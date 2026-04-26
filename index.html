@@ -65,34 +65,20 @@
 
     <script>
         // ==========================================
-        // 1. Mock Data (จำลองข้อมูล)
+        // 1. การเชื่อมต่อ API (Backend Google Apps Script)
         // ==========================================
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxrta7ZfPnnYPtL9305Xk3aK_QKtTsU4EznKiSFcvTvHkFdcvobMsOmHgnib1toFADH/exec";
         const LOGO_URL = "https://img2.pic.in.th/logo-SW.png";
         const ADMIN_PIN = "999999";
 
-        let systemSettings = {
-            targetLat: 6.4255, 
-            targetLng: 101.8252,
-            radius: 50 // รัศมีที่อนุญาต (เมตร)
+        // โครงสร้างข้อมูลหลัก (แทนที่ Mock Data)
+        let appData = {
+            settings: { targetLat: 6.4255, targetLng: 101.8252, radius: 50 },
+            guardians: [],
+            students: [],
+            checkinHistory: [],
+            leaveRequests: []
         };
-
-        let mockGuardians = [
-            { id: "G001", name: "ครูสมปอง ดูแลดี", pin: "123456" },
-            { id: "G002", name: "ครูมาลี ใจเย็น", pin: "654321" }
-        ];
-
-        let mockStudents = [
-            { id: "65001", name: "นาย สมชาย ใจดี", phone: "0811111111", room: "101", bed: "A1", score: 100, status: "in", latestPhoto: null, scoreHistory: [] },
-            { id: "65002", name: "นางสาว สมหญิง รักเรียน", phone: "0822222222", room: "201", bed: "B1", score: 95, status: "out", latestPhoto: null, scoreHistory: [{ date: new Date().toISOString(), oldScore: 100, newScore: 95, reason: "ไม่ทำเวรทำความสะอาด" }] },
-            { id: "65003", name: "นาย สมศักดิ์ เก่งกาจ", phone: "0833333333", room: "102", bed: "A2", score: 80, status: "in", latestPhoto: null, scoreHistory: [{ date: new Date().toISOString(), oldScore: 100, newScore: 80, reason: "ทะเลาะวิวาท" }] },
-        ];
-
-        let mockRequests = [
-            { id: "REQ-001", studentId: "65002", studentName: "นางสาว สมหญิง รักเรียน", reason: "กลับบ้านช่วงเสาร์-อาทิตย์", outDate: "2026-04-25T16:00", inDate: "2026-04-27T17:00", status: "approved" },
-            { id: "REQ-002", studentId: "65003", studentName: "นาย สมศักดิ์ เก่งกาจ", reason: "ไปซื้อของใช้ส่วนตัว", outDate: "2026-04-28T16:00", inDate: "2026-04-28T19:00", status: "pending" }
-        ];
-
-        let mockCheckinHistory = [];
 
         // ==========================================
         // 2. State Management
@@ -104,7 +90,69 @@
         let currentPosition = null;
 
         // ==========================================
-        // 3. Core Functions
+        // 3. ฟังก์ชันเรียกใช้งาน API Database
+        // ==========================================
+        async function apiCall(action, payload = {}) {
+            try {
+                const response = await fetch(WEB_APP_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // ป้องกันปัญหา CORS
+                    body: JSON.stringify({ action: action, payload: payload })
+                });
+                const result = await response.json();
+                if (result.status === 'success') {
+                    return result.data;
+                } else {
+                    throw new Error(result.message);
+                }
+            } catch (error) {
+                console.error("API Error:", error);
+                Swal.fire('ข้อผิดพลาดการเชื่อมต่อ', 'ไม่สามารถเชื่อมต่อฐานข้อมูลได้ กรุณาลองใหม่อีกครั้ง', 'error');
+                throw error;
+            }
+        }
+
+        async function refreshData() {
+            try {
+                appData = await apiCall('getInitialData');
+                
+                // อัปเดตข้อมูลผู้ใช้ปัจจุบัน (ในกรณีที่ข้อมูลเปลี่ยนไปหลังจาก Fetch)
+                if (currentUser) {
+                    if (currentUser.role === 'student') {
+                        currentUser.data = appData.students.find(s => s.id === currentUser.data.id) || currentUser.data;
+                    } else if (currentUser.role === 'guardian') {
+                        currentUser.data = appData.guardians.find(g => g.id === currentUser.data.id) || currentUser.data;
+                    }
+                }
+            } catch (error) {
+                console.error("Failed to refresh data", error);
+            }
+        }
+
+        async function initApp() {
+            const appDiv = document.getElementById('app');
+            appDiv.innerHTML = `
+                <div class="flex-grow flex items-center justify-center flex-col">
+                    <i class="fa-solid fa-circle-notch fa-spin text-5xl text-pink-500 mb-4"></i>
+                    <p class="text-gray-500 font-semibold animate-pulse">กำลังโหลดข้อมูลจาก Google Sheets...</p>
+                </div>
+            `;
+            try {
+                await refreshData();
+                render(); // เปลี่ยนหน้าไปที่ Login
+            } catch (error) {
+                appDiv.innerHTML = `
+                    <div class="flex-grow flex items-center justify-center flex-col">
+                        <i class="fa-solid fa-triangle-exclamation text-5xl text-red-500 mb-4"></i>
+                        <p class="text-gray-500">ไม่สามารถดึงข้อมูลได้ โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต</p>
+                        <button onclick="initApp()" class="mt-4 px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg shadow font-semibold transition">ลองใหม่อีกครั้ง</button>
+                    </div>
+                `;
+            }
+        }
+
+        // ==========================================
+        // 4. Core Functions (Render)
         // ==========================================
         function render() {
             const appDiv = document.getElementById('app');
@@ -131,8 +179,7 @@
                 appDiv.appendChild(contentDiv);
             }
 
-            // ระบบจัดการกล้อง
-            if (currentView === 'student_checkin' && currentUser && currentUser.data.status === 'out') {
+            if (currentView === 'student_checkin' && currentUser && currentUser.data.status !== 'in') {
                 startCamera();
             } else {
                 stopCamera();
@@ -145,7 +192,7 @@
         }
 
         // ==========================================
-        // 4. View Generators (UI Templates)
+        // 5. View Generators (UI Templates)
         // ==========================================
         function getNavbar() {
             const role = currentUser.role;
@@ -259,8 +306,8 @@
         // --- Student Views ---
         function getStudentDashboard() {
             const s = currentUser.data;
-            const myHistory = mockCheckinHistory.filter(h => h.studentId === s.id);
-            const myRequests = mockRequests.filter(r => r.studentId === s.id);
+            const myHistory = appData.checkinHistory.filter(h => h.studentId == s.id);
+            const myRequests = appData.leaveRequests.filter(r => r.studentId == s.id);
             
             return `
                 <div class="mb-6">
@@ -323,8 +370,8 @@
                                                 : '<span class="text-orange-500 bg-orange-50 px-2 py-1 rounded text-xs font-bold"><i class="fa-solid fa-arrow-right-from-bracket mr-1"></i>เช็คเอาท์ออก</span>'}
                                         </td>
                                         <td class="p-4 text-center">
-                                            ${h.type === 'in' && h.photoData 
-                                                ? `<button onclick="viewPhoto('${h.photoData}')" class="text-blue-500 hover:text-blue-700"><i class="fa-solid fa-image fa-lg"></i></button>` 
+                                            ${h.type === 'in' && h.photoUrl 
+                                                ? `<a href="${h.photoUrl}" target="_blank" class="text-blue-500 hover:text-blue-700 bg-blue-50 px-3 py-1 rounded-full text-xs font-semibold"><i class="fa-solid fa-image mr-1"></i>ดูรูป</a>` 
                                                 : '<span class="text-gray-300">-</span>'}
                                         </td>
                                     </tr>
@@ -411,7 +458,7 @@
                                 <div class="w-full">
                                     <p class="text-sm font-semibold text-gray-700">ตรวจสอบพิกัดหอพัก</p>
                                     <p id="gpsStatus" class="text-xs text-gray-500">กำลังค้นหาพิกัดของคุณ...</p>
-                                    <div class="mt-2 text-[10px] text-gray-400">พิกัดเป้าหมาย: ${systemSettings.targetLat}, ${systemSettings.targetLng} (รัศมี ${systemSettings.radius} ม.)</div>
+                                    <div class="mt-2 text-[10px] text-gray-400">พิกัดเป้าหมาย: ${appData.settings.targetLat}, ${appData.settings.targetLng} (รัศมี ${appData.settings.radius} ม.)</div>
                                 </div>
                             </div>
 
@@ -465,8 +512,8 @@
 
         // --- Guardian Views ---
         function getGuardianDashboard() {
-            const total = mockStudents.length;
-            const checkedIn = mockStudents.filter(s => s.status === 'in').length;
+            const total = appData.students.length;
+            const checkedIn = appData.students.filter(s => s.status === 'in').length;
             const outside = total - checkedIn;
             
             return `
@@ -516,7 +563,7 @@
                                 </tr>
                             </thead>
                             <tbody class="text-sm" id="guardianStudentTableBody">
-                                ${mockStudents.map(s => `
+                                ${appData.students.map(s => `
                                     <tr class="border-b hover:bg-gray-50">
                                         <td class="p-4"><div class="font-bold">${s.name}</div><div class="text-xs text-gray-500">รหัส: ${s.id} | โทร: ${s.phone || '-'}</div></td>
                                         <td class="p-4 text-gray-600">${s.room} / ${s.bed}</td>
@@ -530,7 +577,7 @@
                                         </td>
                                         <td class="p-4 text-center">
                                             ${s.status === 'in' && s.latestPhoto 
-                                                ? `<button onclick="viewPhoto('${s.latestPhoto}')" class="bg-blue-100 text-blue-600 hover:bg-blue-200 px-3 py-1 rounded-full text-xs font-semibold transition"><i class="fa-solid fa-camera-retro mr-1"></i>ดูรูป</button>` 
+                                                ? `<a href="${s.latestPhoto}" target="_blank" class="bg-blue-100 text-blue-600 hover:bg-blue-200 px-3 py-1 rounded-full text-xs font-semibold transition inline-block"><i class="fa-solid fa-camera-retro mr-1"></i>ดูรูป</a>` 
                                                 : '<span class="text-gray-300 text-xs">-</span>'}
                                         </td>
                                         <td class="p-4 text-center">
@@ -546,8 +593,8 @@
         }
 
         function getGuardianRequests() {
-            const pendingReqs = mockRequests.filter(r => r.status === 'pending');
-            const historyReqs = mockRequests.filter(r => r.status !== 'pending');
+            const pendingReqs = appData.leaveRequests.filter(r => r.status === 'pending');
+            const historyReqs = appData.leaveRequests.filter(r => r.status !== 'pending');
 
             const renderRow = (r, isPending) => `
                 <tr class="border-b hover:bg-gray-50">
@@ -647,15 +694,15 @@
                             </button>
                             <div>
                                 <label class="block text-sm text-gray-600 mb-1">ละติจูด (Latitude)</label>
-                                <input type="number" step="0.000001" id="adminLat" value="${systemSettings.targetLat}" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400">
+                                <input type="number" step="0.000001" id="adminLat" value="${appData.settings.targetLat}" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400">
                             </div>
                             <div>
                                 <label class="block text-sm text-gray-600 mb-1">ลองจิจูด (Longitude)</label>
-                                <input type="number" step="0.000001" id="adminLng" value="${systemSettings.targetLng}" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400">
+                                <input type="number" step="0.000001" id="adminLng" value="${appData.settings.targetLng}" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400">
                             </div>
                             <div>
                                 <label class="block text-sm text-gray-600 mb-1">รัศมีที่อนุญาตให้เช็คอิน (เมตร)</label>
-                                <input type="number" id="adminRadius" value="${systemSettings.radius}" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400">
+                                <input type="number" id="adminRadius" value="${appData.settings.radius}" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400">
                             </div>
                             <button onclick="saveGPS()" class="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700 transition mt-2">
                                 บันทึกพิกัดและรัศมี
@@ -667,7 +714,7 @@
                     <div class="bg-white rounded-xl shadow-md p-6 lg:col-span-2">
                         <div class="flex justify-between items-center mb-4 border-b pb-2">
                             <h3 class="font-bold text-gray-700"><i class="fa-solid fa-user-shield mr-2 text-pink-500"></i>ข้อมูลผู้ดูแลหอพัก</h3>
-                            <button onclick="openAddGuardian()" class="bg-pink-500 text-white px-3 py-1.5 rounded text-sm font-semibold hover:bg-pink-600"><i class="fa-solid fa-plus mr-1"></i>เพิ่มผู้ดูแล</button>
+                            <button onclick="Swal.fire('กำลังพัฒนา', 'ฟังก์ชันนี้จะเปิดให้ใช้งานในอัปเดตถัดไป', 'info')" class="bg-pink-500 text-white px-3 py-1.5 rounded text-sm font-semibold hover:bg-pink-600"><i class="fa-solid fa-plus mr-1"></i>เพิ่มผู้ดูแล</button>
                         </div>
                         <div class="overflow-x-auto">
                             <table class="w-full text-left border-collapse">
@@ -680,14 +727,14 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    ${mockGuardians.map(g => `
+                                    ${appData.guardians.map(g => `
                                         <tr class="border-b hover:bg-gray-50">
                                             <td class="p-3 font-mono text-blue-600">${g.id}</td>
                                             <td class="p-3 font-medium">${g.name}</td>
                                             <td class="p-3 text-gray-500">******</td>
                                             <td class="p-3 text-center">
-                                                <button onclick="openEditGuardian('${g.id}')" class="text-blue-500 hover:text-blue-700 mr-3"><i class="fa-solid fa-edit"></i></button>
-                                                <button onclick="deleteGuardian('${g.id}')" class="text-red-500 hover:text-red-700"><i class="fa-solid fa-trash"></i></button>
+                                                <button onclick="Swal.fire('กำลังพัฒนา', 'ฟังก์ชันนี้จะเปิดให้ใช้งานในอัปเดตถัดไป', 'info')" class="text-blue-500 hover:text-blue-700 mr-3"><i class="fa-solid fa-edit"></i></button>
+                                                <button onclick="Swal.fire('กำลังพัฒนา', 'ฟังก์ชันนี้จะเปิดให้ใช้งานในอัปเดตถัดไป', 'info')" class="text-red-500 hover:text-red-700"><i class="fa-solid fa-trash"></i></button>
                                             </td>
                                         </tr>
                                     `).join('')}
@@ -700,14 +747,14 @@
         }
 
         // ==========================================
-        // 5. Action Handlers (ฟังก์ชันต่างๆ)
+        // 6. Action Handlers (การส่งข้อมูล)
         // ==========================================
         
         function switchLoginTab(tab) { loginTab = tab; render(); }
 
         function handleStudentLogin() {
             const id = document.getElementById('studentIdInput').value.trim();
-            const student = mockStudents.find(s => s.id === id);
+            const student = appData.students.find(s => s.id == id);
             if (student) {
                 currentUser = { role: 'student', data: student };
                 Swal.fire({ title: 'เข้าสู่ระบบสำเร็จ', text: `ยินดีต้อนรับ ${student.name}`, icon: 'success', timer: 1000, showConfirmButton: false }).then(() => navigate('student_dash'));
@@ -719,7 +766,7 @@
         function handleGuardianLogin() {
             const id = document.getElementById('guardianIdInput').value.trim();
             const pin = document.getElementById('guardianPinInput').value;
-            const guardian = mockGuardians.find(g => g.id === id && g.pin === pin);
+            const guardian = appData.guardians.find(g => g.id == id && g.pin == pin);
             
             if (guardian) {
                 currentUser = { role: 'guardian', data: guardian };
@@ -743,7 +790,7 @@
                         currentUser = { role: 'admin', data: {} };
                         Swal.fire({ icon: 'success', title: 'Admin Logged in', timer: 1000, showConfirmButton: false }).then(() => navigate('admin_dash'));
                     } else {
-                        Swal.fire('Error', 'รหัสผ่านแอดมินไม่ถูกต้อง (ลอง 999999)', 'error');
+                        Swal.fire('Error', 'รหัสผ่านแอดมินไม่ถูกต้อง', 'error');
                     }
                 }
             });
@@ -755,7 +802,7 @@
             navigate('login');
         }
 
-        // --- Camera & GPS Check-in/out ---
+        // --- Camera & GPS ---
         async function startCamera() {
             const video = document.getElementById('checkinVideo');
             const loading = document.getElementById('cameraLoading');
@@ -777,9 +824,7 @@
                 cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
                 if(video) {
                     video.srcObject = cameraStream;
-                    video.onloadedmetadata = () => {
-                        if(loading) loading.classList.add('hidden');
-                    };
+                    video.onloadedmetadata = () => { if(loading) loading.classList.add('hidden'); };
                 }
             } catch (err) {
                 if(loading) loading.innerHTML = `<i class="fa-solid fa-video-slash text-red-500 text-3xl mb-2"></i><br>เบราว์เซอร์ไม่สามารถเปิดกล้องได้`;
@@ -802,7 +847,6 @@
             
             video.classList.add('hidden'); 
             canvas.classList.remove('hidden');
-            
             document.getElementById('btnCapture').classList.add('hidden');
             document.getElementById('btnRetake').classList.remove('hidden');
             document.getElementById('btnSubmitCheckin').classList.remove('hidden');
@@ -820,16 +864,15 @@
         function submitCheckin() {
             if (!currentPosition) return Swal.fire('แจ้งเตือน', 'กรุณารอระบบดึงพิกัด GPS ก่อน', 'warning');
 
-            // คำนวณระยะห่าง (Geofencing)
             const distance = calculateDistance(
                 currentPosition.latitude, currentPosition.longitude,
-                systemSettings.targetLat, systemSettings.targetLng
+                appData.settings.targetLat, appData.settings.targetLng
             );
 
-            if (distance > systemSettings.radius) {
+            if (distance > appData.settings.radius) {
                 return Swal.fire({
                     title: 'เช็คอินไม่สำเร็จ',
-                    html: `คุณอยู่นอกพื้นที่หอพัก<br>ระยะห่างปัจจุบัน: <b>${Math.round(distance)} เมตร</b><br><span class="text-sm text-gray-500">(อนุญาตเฉพาะในรัศมี ${systemSettings.radius} เมตร)</span>`,
+                    html: `คุณอยู่นอกพื้นที่หอพัก<br>ระยะห่างปัจจุบัน: <b>${Math.round(distance)} เมตร</b><br><span class="text-sm text-gray-500">(อนุญาตเฉพาะในรัศมี ${appData.settings.radius} เมตร)</span>`,
                     icon: 'error'
                 });
             }
@@ -838,29 +881,18 @@
             const photoDataUrl = canvas.toDataURL('image/jpeg', 0.7);
 
             Swal.fire({
-                title: 'กำลังบันทึกข้อมูล...',
+                title: 'กำลังอัปโหลดข้อมูลไปยัง Google Drive...',
                 allowOutsideClick: false,
-                didOpen: () => {
+                didOpen: async () => {
                     Swal.showLoading();
-                    setTimeout(() => {
-                        const sIndex = mockStudents.findIndex(s => s.id === currentUser.data.id);
-                        if(sIndex > -1) {
-                            mockStudents[sIndex].status = 'in';
-                            mockStudents[sIndex].latestPhoto = photoDataUrl;
-                        }
-                        currentUser.data.status = 'in';
-
-                        mockCheckinHistory.unshift({
-                            id: Date.now(),
-                            studentId: currentUser.data.id,
-                            type: 'in',
-                            timestamp: new Date().toISOString(),
-                            photoData: photoDataUrl
-                        });
-
+                    try {
+                        await apiCall('checkIn', { studentId: currentUser.data.id, photoData: photoDataUrl });
+                        await refreshData();
                         stopCamera();
                         Swal.fire('เช็คอินสำเร็จ!', 'บันทึกรูปและพิกัดเรียบร้อย', 'success').then(() => navigate('student_dash'));
-                    }, 1500);
+                    } catch(e) {
+                        // Error handled by apiCall
+                    }
                 }
             });
         }
@@ -877,24 +909,15 @@
             }).then((result) => {
                 if (result.isConfirmed) {
                     Swal.fire({
-                        title: 'กำลังบันทึก...',
-                        didOpen: () => {
+                        title: 'กำลังบันทึกข้อมูล...',
+                        allowOutsideClick: false,
+                        didOpen: async () => {
                             Swal.showLoading();
-                            setTimeout(() => {
-                                const sIndex = mockStudents.findIndex(s => s.id === currentUser.data.id);
-                                if(sIndex > -1) mockStudents[sIndex].status = 'out';
-                                currentUser.data.status = 'out';
-
-                                mockCheckinHistory.unshift({
-                                    id: Date.now(),
-                                    studentId: currentUser.data.id,
-                                    type: 'out',
-                                    timestamp: new Date().toISOString(),
-                                    photoData: null 
-                                });
-
+                            try {
+                                await apiCall('checkOut', { studentId: currentUser.data.id });
+                                await refreshData();
                                 Swal.fire('เช็คเอาท์สำเร็จ!', 'บันทึกการออกหอพักเรียบร้อย', 'success').then(() => navigate('student_dash'));
-                            }, 1000);
+                            } catch(e) {}
                         }
                     });
                 }
@@ -913,17 +936,13 @@
         }
 
         function calculateDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371e3; // รัศมีโลก (เมตร)
+            const R = 6371e3; 
             const p1 = lat1 * Math.PI/180;
             const p2 = lat2 * Math.PI/180;
             const dp = (lat2-lat1) * Math.PI/180;
             const dl = (lon2-lon1) * Math.PI/180;
-
-            const a = Math.sin(dp/2) * Math.sin(dp/2) +
-                      Math.cos(p1) * Math.cos(p2) *
-                      Math.sin(dl/2) * Math.sin(dl/2);
+            const a = Math.sin(dp/2) * Math.sin(dp/2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl/2) * Math.sin(dl/2);
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-
             return R * c; 
         }
 
@@ -943,26 +962,30 @@
                 confirmButtonText: 'ยืนยันการส่ง'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    mockRequests.unshift({
-                        id: 'REQ-' + Math.floor(Math.random() * 1000),
-                        studentId: currentUser.data.id,
-                        studentName: currentUser.data.name,
-                        reason: reason,
-                        outDate: outD,
-                        inDate: inD,
-                        status: 'pending'
+                    Swal.fire({
+                        title: 'กำลังส่งคำขอ...',
+                        allowOutsideClick: false,
+                        didOpen: async () => {
+                            Swal.showLoading();
+                            try {
+                                await apiCall('submitLeave', {
+                                    studentId: currentUser.data.id,
+                                    studentName: currentUser.data.name,
+                                    reason: reason,
+                                    outDate: outD,
+                                    inDate: inD
+                                });
+                                await refreshData();
+                                Swal.fire('ส่งคำขอสำเร็จ!', 'กรุณารอผู้ดูแลหอพักอนุมัติ', 'success').then(() => navigate('student_dash'));
+                            } catch(e) {}
+                        }
                     });
-
-                    Swal.fire('ส่งคำขอสำเร็จ!', 'กรุณารอผู้ดูแลหอพักอนุมัติ', 'success').then(() => navigate('student_dash'));
                 }
             });
         }
 
         // --- Guardian Handlers ---
         function handleRequest(reqId, action) {
-            const reqIndex = mockRequests.findIndex(r => r.id === reqId);
-            if (reqIndex === -1) return;
-
             const actionText = action === 'approved' ? 'อนุญาต' : 'ไม่อนุญาต';
             const actionColor = action === 'approved' ? '#22c55e' : '#ef4444';
 
@@ -976,16 +999,26 @@
                 cancelButtonText: 'ยกเลิก'
             }).then((result) => {
                 if (result.isConfirmed) {
-                    mockRequests[reqIndex].status = action;
-                    Swal.fire('สำเร็จ', `ระบบได้${actionText}คำขอเรียบร้อยแล้ว`, 'success');
-                    render();
+                    Swal.fire({
+                        title: 'กำลังดำเนินการ...',
+                        allowOutsideClick: false,
+                        didOpen: async () => {
+                            Swal.showLoading();
+                            try {
+                                await apiCall('updateRequestStatus', { reqId: reqId, status: action });
+                                await refreshData();
+                                Swal.fire('สำเร็จ', `ระบบได้${actionText}คำขอเรียบร้อยแล้ว`, 'success');
+                                render();
+                            } catch(e) {}
+                        }
+                    });
                 }
             });
         }
 
         function editScore(studentId) {
-            const student = mockStudents.find(s => s.id === studentId);
-            const originalScore = student.score;
+            const student = appData.students.find(s => s.id == studentId);
+            const originalScore = parseInt(student.score);
             
             Swal.fire({
                 title: 'ปรับคะแนนพฤติกรรม',
@@ -1008,42 +1041,38 @@
                 preConfirm: () => {
                     const newScore = document.getElementById('scoreInput').value;
                     const reason = document.getElementById('scoreReason').value.trim();
-                    if (newScore < 0 || newScore > 100) {
-                        Swal.showValidationMessage('คะแนนต้องอยู่ระหว่าง 0 - 100');
-                        return false;
-                    }
-                    if (newScore != originalScore && !reason) {
-                        Swal.showValidationMessage('กรุณาระบุเหตุผลในการปรับคะแนน');
-                        return false;
-                    }
-                    return { newScore, reason };
+                    if (newScore < 0 || newScore > 100) { Swal.showValidationMessage('คะแนนต้องอยู่ระหว่าง 0 - 100'); return false; }
+                    if (newScore != originalScore && !reason) { Swal.showValidationMessage('กรุณาระบุเหตุผลในการปรับคะแนน'); return false; }
+                    return { newScore: parseInt(newScore), reason };
                 }
             }).then((result) => {
                 if (result.isConfirmed) {
-                    const newScore = parseInt(result.value.newScore);
-                    if (!student.scoreHistory) student.scoreHistory = [];
-                    if (newScore != originalScore) {
-                        student.scoreHistory.unshift({
-                            date: new Date().toISOString(),
-                            oldScore: originalScore,
-                            newScore: newScore,
-                            reason: result.value.reason || "ปรับคะแนน (ไม่มีเหตุผล)"
-                        });
-                    }
-                    
-                    student.score = newScore;
-                    let successText = 'อัปเดตคะแนนพฤติกรรมเรียบร้อยแล้ว';
-                    if(result.value.reason) {
-                        successText += `<br><span class="text-sm text-gray-500">เหตุผล: ${result.value.reason}</span>`;
-                    }
-                    Swal.fire('บันทึกสำเร็จ', successText, 'success');
-                    render();
+                    Swal.fire({
+                        title: 'กำลังบันทึกข้อมูล...',
+                        allowOutsideClick: false,
+                        didOpen: async () => {
+                            Swal.showLoading();
+                            try {
+                                await apiCall('updateScore', {
+                                    studentId: studentId,
+                                    oldScore: originalScore,
+                                    newScore: result.value.newScore,
+                                    reason: result.value.reason || "ปรับคะแนน (ไม่มีเหตุผล)"
+                                });
+                                await refreshData();
+                                let successText = 'อัปเดตคะแนนพฤติกรรมเรียบร้อยแล้ว';
+                                if(result.value.reason) successText += `<br><span class="text-sm text-gray-500">เหตุผล: ${result.value.reason}</span>`;
+                                Swal.fire('บันทึกสำเร็จ', successText, 'success');
+                                render();
+                            } catch(e) {}
+                        }
+                    });
                 }
             });
         }
 
         function viewScoreHistory(studentId) {
-            const student = mockStudents.find(s => s.id === studentId);
+            const student = appData.students.find(s => s.id == studentId);
             let historyHtml = '';
             
             if (!student.scoreHistory || student.scoreHistory.length === 0) {
@@ -1109,26 +1138,20 @@
                     
                     <div id="tab-single" class="text-left space-y-3">
                         <div class="grid grid-cols-2 gap-3">
-                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">รหัสนักเรียน <span class="text-red-500">*</span></label><input type="text" id="add-s-id" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น 65004"></div>
-                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">เบอร์ติดต่อ</label><input type="text" id="add-s-phone" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น 0812345678"></div>
+                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">รหัสนักเรียน <span class="text-red-500">*</span></label><input type="text" id="add-s-id" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400"></div>
+                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">เบอร์ติดต่อ</label><input type="text" id="add-s-phone" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400"></div>
                         </div>
-                        <div><label class="text-sm text-gray-600 font-semibold mb-1 block">ชื่อ-นามสกุล <span class="text-red-500">*</span></label><input type="text" id="add-s-name" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น นาย เรียนดี มีชัย"></div>
+                        <div><label class="text-sm text-gray-600 font-semibold mb-1 block">ชื่อ-นามสกุล <span class="text-red-500">*</span></label><input type="text" id="add-s-name" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400"></div>
                         <div class="grid grid-cols-2 gap-3">
-                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">ห้องพัก</label><input type="text" id="add-s-room" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น 101"></div>
-                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">เตียง</label><input type="text" id="add-s-bed" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น A1"></div>
+                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">ห้องพัก</label><input type="text" id="add-s-room" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400"></div>
+                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">เตียง</label><input type="text" id="add-s-bed" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400"></div>
                         </div>
                     </div>
 
                     <div id="tab-bulk" class="hidden text-left space-y-4">
-                        <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:bg-gray-50 transition cursor-pointer" onclick="document.getElementById('add-s-file').click()">
-                            <i class="fa-solid fa-file-excel text-4xl text-green-500 mb-2"></i>
-                            <p class="text-sm text-gray-600">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่</p>
-                            <p class="text-xs text-gray-400 mt-1">รองรับไฟล์ .xlsx, .xls, .csv</p>
-                            <input type="file" id="add-s-file" class="hidden" accept=".xlsx, .xls, .csv" onchange="document.getElementById('file-name-display').innerText = this.files[0] ? this.files[0].name : ''">
-                            <p id="file-name-display" class="text-sm text-blue-600 mt-2 font-semibold"></p>
-                        </div>
-                        <div class="bg-blue-50 p-3 rounded-lg text-xs text-blue-700">
-                            <i class="fa-solid fa-circle-info mr-1"></i> ระบบจะนำเข้าข้อมูล <strong>รหัส, ชื่อ-สกุล, ห้อง, เตียง</strong> เพื่อเพิ่มเข้าสู่ฐานข้อมูลโดยอัตโนมัติ
+                        <div class="bg-yellow-50 p-4 rounded-lg text-sm text-yellow-700 text-center border border-yellow-200">
+                            <i class="fa-solid fa-person-digging text-3xl mb-2"></i><br>
+                            ระบบดึงข้อมูลจากไฟล์ Excel/CSV อัตโนมัติกำลังอยู่ในระหว่างการพัฒนา <br>กรุณาเพิ่มนักเรียนแบบรายบุคคลชั่วคราว
                         </div>
                     </div>
                 `,
@@ -1144,37 +1167,28 @@
                         const name = document.getElementById('add-s-name').value;
                         const room = document.getElementById('add-s-room').value;
                         const bed = document.getElementById('add-s-bed').value;
-                        if(!id || !name) {
-                            Swal.showValidationMessage('กรุณากรอกรหัสและชื่อนักเรียน');
-                            return false;
-                        }
-                        return { type: 'single', data: { id, name, phone: phone||"-", room: room||"-", bed: bed||"-", score: 100, status: 'out', latestPhoto: null, scoreHistory: [] } };
+                        if(!id || !name) { Swal.showValidationMessage('กรุณากรอกรหัสและชื่อนักเรียน'); return false; }
+                        return { type: 'single', data: { id, name, phone: phone||"-", room: room||"-", bed: bed||"-", score: 100, status: 'out', latestPhoto: "" } };
                     } else {
-                        const fileInput = document.getElementById('add-s-file');
-                        if (!fileInput.files.length) {
-                            Swal.showValidationMessage('กรุณาเลือกไฟล์ก่อนกดบันทึก');
-                            return false;
-                        }
-                        return { type: 'bulk', file: fileInput.files[0] };
+                        Swal.showValidationMessage('ฟังก์ชันอัปโหลดไฟล์ยังไม่เปิดให้บริการ');
+                        return false;
                     }
                 }
             }).then((result) => {
-                if (result.isConfirmed) {
-                    if (result.value.type === 'single') {
-                        mockStudents.push(result.value.data);
-                        Swal.fire('สำเร็จ', 'เพิ่มนักเรียนรายใหม่เรียบร้อยแล้ว', 'success');
-                        render();
-                    } else {
-                        Swal.fire({ title: 'กำลังอัปโหลด...', text: 'กรุณารอสักครู่', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                        setTimeout(() => {
-                            mockStudents.push(
-                                { id: "65004", name: "นาย สมบูรณ์ เพิ่มจากไฟล์", phone: "0899999999", room: "202", bed: "A1", score: 100, status: "out", latestPhoto: null, scoreHistory: [] },
-                                { id: "65005", name: "นางสาว สุดสวย ทดสอบอัปโหลด", phone: "0888888888", room: "202", bed: "A2", score: 100, status: "out", latestPhoto: null, scoreHistory: [] }
-                            );
-                            Swal.fire('สำเร็จ', `นำเข้าข้อมูลนักเรียนจำลองจากไฟล์ <b>${result.value.file.name}</b> สำเร็จ!`, 'success');
-                            render();
-                        }, 1500);
-                    }
+                if (result.isConfirmed && result.value.type === 'single') {
+                    Swal.fire({
+                        title: 'กำลังบันทึกข้อมูล...',
+                        allowOutsideClick: false,
+                        didOpen: async () => {
+                            Swal.showLoading();
+                            try {
+                                await apiCall('addStudentSingle', result.value.data);
+                                await refreshData();
+                                Swal.fire('สำเร็จ', 'เพิ่มนักเรียนรายใหม่เรียบร้อยแล้ว', 'success');
+                                render();
+                            } catch(e) {}
+                        }
+                    });
                 }
             });
         }
@@ -1186,10 +1200,18 @@
             const radius = document.getElementById('adminRadius').value;
             if(!lat || !lng || !radius) return Swal.fire('Error', 'กรุณากรอกข้อมูลให้ครบ', 'error');
             
-            systemSettings.targetLat = parseFloat(lat);
-            systemSettings.targetLng = parseFloat(lng);
-            systemSettings.radius = parseInt(radius);
-            Swal.fire('สำเร็จ', 'อัปเดตพิกัดและรัศมีหอพักเรียบร้อย', 'success');
+            Swal.fire({
+                title: 'กำลังบันทึกข้อมูล...',
+                allowOutsideClick: false,
+                didOpen: async () => {
+                    Swal.showLoading();
+                    try {
+                        await apiCall('updateSettings', { targetLat: parseFloat(lat), targetLng: parseFloat(lng), radius: parseInt(radius) });
+                        await refreshData();
+                        Swal.fire('สำเร็จ', 'อัปเดตพิกัดและรัศมีหอพักเรียบร้อย', 'success');
+                    } catch(e) {}
+                }
+            });
         }
 
         function autoFetchGPS() {
@@ -1202,94 +1224,24 @@
                         Swal.close();
                         Swal.fire('ดึงพิกัดสำเร็จ', 'ดึงพิกัดปัจจุบันเรียบร้อยแล้ว กรุณากดบันทึกพิกัด', 'success');
                     },
-                    (err) => {
-                        Swal.fire('ข้อผิดพลาด', 'ไม่สามารถดึงพิกัดได้ (กรุณาอนุญาต Location)', 'error');
-                    }
+                    (err) => { Swal.fire('ข้อผิดพลาด', 'ไม่สามารถดึงพิกัดได้ (กรุณาอนุญาต Location)', 'error'); }
                 );
             } else {
                 Swal.fire('ข้อผิดพลาด', 'เบราว์เซอร์นี้ไม่รองรับระบบ GPS', 'error');
             }
         }
 
-        function openAddGuardian() {
-            Swal.fire({
-                title: 'เพิ่มผู้ดูแลหอพัก',
-                html: `
-                    <input id="swal-g-id" class="swal2-input" placeholder="รหัสผู้ดูแล (เช่น G003)">
-                    <input id="swal-g-name" class="swal2-input" placeholder="ชื่อ-นามสกุล">
-                    <input id="swal-g-pin" type="password" class="swal2-input" placeholder="PIN 6 หลัก" maxlength="6">
-                `,
-                focusConfirm: false,
-                showCancelButton: true,
-                confirmButtonText: 'บันทึก',
-                preConfirm: () => {
-                    const id = document.getElementById('swal-g-id').value;
-                    const name = document.getElementById('swal-g-name').value;
-                    const pin = document.getElementById('swal-g-pin').value;
-                    if (!id || !name || pin.length !== 6) Swal.showValidationMessage('กรุณากรอกข้อมูลให้ครบ และ PIN 6 หลัก');
-                    return { id, name, pin };
-                }
-            }).then((res) => {
-                if (res.isConfirmed) {
-                    mockGuardians.push(res.value);
-                    Swal.fire('สำเร็จ', 'เพิ่มผู้ดูแลเรียบร้อย', 'success');
-                    render();
-                }
-            });
-        }
-
-        function openEditGuardian(id) {
-            const g = mockGuardians.find(x => x.id === id);
-            Swal.fire({
-                title: 'แก้ไขผู้ดูแล',
-                html: `
-                    <input id="swal-g-id" class="swal2-input bg-gray-100" value="${g.id}" readonly title="ไม่สามารถแก้รหัสได้">
-                    <input id="swal-g-name" class="swal2-input" value="${g.name}" placeholder="ชื่อ-นามสกุล">
-                    <input id="swal-g-pin" type="text" class="swal2-input" value="${g.pin}" placeholder="PIN 6 หลัก" maxlength="6">
-                `,
-                showCancelButton: true,
-                confirmButtonText: 'บันทึกการแก้ไข',
-                preConfirm: () => {
-                    const name = document.getElementById('swal-g-name').value;
-                    const pin = document.getElementById('swal-g-pin').value;
-                    if (!name || pin.length !== 6) Swal.showValidationMessage('กรุณากรอกชื่อ และ PIN 6 หลัก');
-                    return { name, pin };
-                }
-            }).then((res) => {
-                if (res.isConfirmed) {
-                    g.name = res.value.name;
-                    g.pin = res.value.pin;
-                    Swal.fire('สำเร็จ', 'อัปเดตข้อมูลเรียบร้อย', 'success');
-                    render();
-                }
-            });
-        }
-
-        function deleteGuardian(id) {
-            Swal.fire({
-                title: 'ยืนยันการลบ?',
-                text: "หากลบแล้วจะไม่สามารถกู้คืนได้",
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonColor: '#ef4444',
-                confirmButtonText: 'ใช่, ลบเลย'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    mockGuardians = mockGuardians.filter(g => g.id !== id);
-                    Swal.fire('ลบสำเร็จ!', 'ข้อมูลผู้ดูแลถูกลบแล้ว.', 'success');
-                    render();
-                }
-            });
-        }
-
         // Utils
         function formatDate(isoString) {
+            if (!isoString) return "-";
             const d = new Date(isoString);
+            if (isNaN(d.getTime())) return isoString; // Fallback หากรูปแบบวันที่ไม่ถูกต้อง
             return d.toLocaleString('th-TH', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) + ' น.';
         }
 
-        // เริ่มต้นการทำงาน (เรียก Render ทันทีที่โหลดเสร็จ)
-        window.onload = () => render();
+        // เริ่มต้นการทำงาน โหลดข้อมูลจาก Database ก่อนเสมอ
+        window.onload = initApp;
+
     </script>
 </body>
 </html>
