@@ -67,7 +67,7 @@
         // ==========================================
         // 1. การเชื่อมต่อ API (Backend Google Apps Script)
         // ==========================================
-        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw46yu-n9nBKqqFgRt-NmpQ5qesWYDhCtPpBnSm2KgOXnBo-ek83RDpZClnsbBRTxk5/exec";
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxrta7ZfPnnYPtL9305Xk3aK_QKtTsU4EznKiSFcvTvHkFdcvobMsOmHgnib1toFADH/exec";
         const LOGO_URL = "https://img2.pic.in.th/logo-SW.png";
 
         // โครงสร้างข้อมูลหลัก
@@ -117,14 +117,29 @@
                 
                 if (currentUser) {
                     if (currentUser.role === 'student') {
-                        currentUser.data = appData.students.find(s => s.id === currentUser.data.id) || currentUser.data;
+                        currentUser.data = appData.students.find(s => String(s.id) === String(currentUser.data.id)) || currentUser.data;
                     } else if (currentUser.role === 'guardian') {
-                        currentUser.data = appData.guardians.find(g => g.id === currentUser.data.id) || currentUser.data;
+                        currentUser.data = appData.guardians.find(g => String(g.id) === String(currentUser.data.id)) || currentUser.data;
                     }
                 }
             } catch (error) {
                 console.error("Failed to refresh data", error);
             }
+        }
+
+        function handleRefresh() {
+            Swal.fire({
+                title: 'กำลังอัปเดตข้อมูล...',
+                allowOutsideClick: false,
+                didOpen: async () => {
+                    Swal.showLoading();
+                    try {
+                        await refreshData();
+                        render();
+                        Swal.fire({ icon: 'success', title: 'อัปเดตข้อมูลล่าสุดแล้ว', timer: 1000, showConfirmButton: false });
+                    } catch (error) {}
+                }
+            });
         }
 
         async function initApp() {
@@ -234,6 +249,12 @@
                                 <p class="text-sm font-semibold">${name}</p>
                                 <p class="text-xs text-blue-200">${roleLabels[role]}</p>
                             </div>
+                            
+                            <!-- ปุ่มรีเฟรช -->
+                            <button onclick="handleRefresh()" class="bg-white/20 hover:bg-white/30 text-white w-9 h-9 flex items-center justify-center rounded-full transition shadow" title="รีเฟรชข้อมูลล่าสุด">
+                                <i class="fa-solid fa-rotate-right"></i>
+                            </button>
+
                             <button onclick="handleLogout()" class="bg-white text-pink-600 hover:bg-gray-100 px-4 py-2 rounded-full text-sm font-semibold shadow transition flex items-center gap-2">
                                 <i class="fa-solid fa-right-from-bracket"></i> <span class="hidden sm:inline">ออกจากระบบ</span>
                             </button>
@@ -304,7 +325,7 @@
         // --- Student Views ---
         function getStudentDashboard() {
             const s = currentUser.data;
-            // กรองข้อมูลด้วย String() ป้องกันปัญหา Type Mismatch และจำกัดการแสดงผลที่ 7 แถวล่าสุด
+            // กรองประวัติเช็คอินและอนุญาตด้วย String ป้องกัน Type mismatch และจำกัด 7 แถว
             const myHistory = appData.checkinHistory.filter(h => String(h.studentId) === String(s.id)).slice(0, 7);
             const myRequests = appData.leaveRequests.filter(r => String(r.studentId) === String(s.id)).slice(0, 7);
             
@@ -593,7 +614,7 @@
 
         function getGuardianRequests() {
             const pendingReqs = appData.leaveRequests.filter(r => r.status === 'pending');
-            // จำกัดประวัติการขออนุญาตที่เคยทำรายการไปแล้วให้แสดงผลแค่ 7 แถวล่าสุด
+            // จำกัดประวัติการขออนุญาตที่แสดงแค่ 7 แถว
             const historyReqs = appData.leaveRequests.filter(r => r.status !== 'pending').slice(0, 7);
 
             const renderRow = (r, isPending) => `
@@ -754,7 +775,7 @@
 
         function handleStudentLogin() {
             const id = document.getElementById('studentIdInput').value.trim();
-            const student = appData.students.find(s => s.id == id);
+            const student = appData.students.find(s => String(s.id) === String(id));
             if (student) {
                 currentUser = { role: 'student', data: student };
                 Swal.fire({ title: 'เข้าสู่ระบบสำเร็จ', text: `ยินดีต้อนรับ ${student.name}`, icon: 'success', timer: 1000, showConfirmButton: false }).then(() => navigate('student_dash'));
@@ -765,8 +786,8 @@
 
         function handleGuardianLogin() {
             const id = document.getElementById('guardianIdInput').value.trim();
-            const pin = document.getElementById('guardianPinInput').value;
-            const guardian = appData.guardians.find(g => g.id == id && g.pin == pin);
+            const pin = document.getElementById('guardianPinInput').value.trim();
+            const guardian = appData.guardians.find(g => String(g.id) === String(id) && String(g.pin) === String(pin));
             
             if (guardian) {
                 currentUser = { role: 'guardian', data: guardian };
@@ -1026,7 +1047,7 @@
         }
 
         function editScore(studentId) {
-            const student = appData.students.find(s => s.id == studentId);
+            const student = appData.students.find(s => String(s.id) === String(studentId));
             const originalScore = parseInt(student.score);
             
             Swal.fire({
@@ -1081,14 +1102,15 @@
         }
 
         function viewScoreHistory(studentId) {
-            const student = appData.students.find(s => s.id == studentId);
+            const student = appData.students.find(s => String(s.id) === String(studentId));
             let historyHtml = '';
             
             if (!student.scoreHistory || student.scoreHistory.length === 0) {
                 historyHtml = '<p class="text-gray-500 text-sm my-6 text-center">ไม่มีประวัติการปรับคะแนนพฤติกรรม</p>';
             } else {
                 historyHtml = '<div class="text-left mt-4 max-h-60 overflow-y-auto"><ul class="space-y-3">';
-                student.scoreHistory.forEach(h => {
+                // จำกัดประวัติคะแนนที่ 7 แถวเช่นกัน
+                student.scoreHistory.slice(0, 7).forEach(h => {
                     const diff = h.newScore - h.oldScore;
                     const diffText = diff > 0 ? `<span class="text-green-600 font-bold">+${diff}</span>` : (diff < 0 ? `<span class="text-red-600 font-bold">${diff}</span>` : `<span class="text-gray-600 font-bold">0</span>`);
                     historyHtml += `
@@ -1202,7 +1224,7 @@
             });
         }
 
-        // --- Admin Handlers ---
+        // --- Admin Handlers (การตั้งค่า และ CRUD ผู้ดูแล) ---
         function saveGPS() {
             const lat = document.getElementById('adminLat').value;
             const lng = document.getElementById('adminLng').value;
