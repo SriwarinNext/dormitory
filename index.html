@@ -69,9 +69,8 @@
         // ==========================================
         const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxrta7ZfPnnYPtL9305Xk3aK_QKtTsU4EznKiSFcvTvHkFdcvobMsOmHgnib1toFADH/exec";
         const LOGO_URL = "https://img2.pic.in.th/logo-SW.png";
-        const ADMIN_PIN = "999999";
 
-        // โครงสร้างข้อมูลหลัก (แทนที่ Mock Data)
+        // โครงสร้างข้อมูลหลัก
         let appData = {
             settings: { targetLat: 6.4255, targetLng: 101.8252, radius: 50 },
             guardians: [],
@@ -96,7 +95,7 @@
             try {
                 const response = await fetch(WEB_APP_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // ป้องกันปัญหา CORS
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({ action: action, payload: payload })
                 });
                 const result = await response.json();
@@ -116,7 +115,6 @@
             try {
                 appData = await apiCall('getInitialData');
                 
-                // อัปเดตข้อมูลผู้ใช้ปัจจุบัน (ในกรณีที่ข้อมูลเปลี่ยนไปหลังจาก Fetch)
                 if (currentUser) {
                     if (currentUser.role === 'student') {
                         currentUser.data = appData.students.find(s => s.id === currentUser.data.id) || currentUser.data;
@@ -139,7 +137,7 @@
             `;
             try {
                 await refreshData();
-                render(); // เปลี่ยนหน้าไปที่ Login
+                render(); 
             } catch (error) {
                 appDiv.innerHTML = `
                     <div class="flex-grow flex items-center justify-center flex-col">
@@ -783,15 +781,24 @@
                 inputPlaceholder: 'กรอกรหัสผ่าน Admin',
                 showCancelButton: true,
                 confirmButtonText: 'เข้าสู่ระบบ',
-                cancelButtonText: 'ยกเลิก'
-            }).then((result) => {
-                if (result.isConfirmed) {
-                    if (result.value === ADMIN_PIN) {
-                        currentUser = { role: 'admin', data: {} };
-                        Swal.fire({ icon: 'success', title: 'Admin Logged in', timer: 1000, showConfirmButton: false }).then(() => navigate('admin_dash'));
-                    } else {
-                        Swal.fire('Error', 'รหัสผ่านแอดมินไม่ถูกต้อง', 'error');
+                cancelButtonText: 'ยกเลิก',
+                showLoaderOnConfirm: true,
+                preConfirm: async (pin) => {
+                    try {
+                        const response = await apiCall('verifyAdmin', { pin: pin });
+                        if (!response.valid) {
+                            Swal.showValidationMessage('รหัสผ่านแอดมินไม่ถูกต้อง');
+                        }
+                        return response;
+                    } catch (error) {
+                        Swal.showValidationMessage('ข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์');
                     }
+                },
+                allowOutsideClick: () => !Swal.isLoading()
+            }).then((result) => {
+                if (result.isConfirmed && result.value.valid) {
+                    currentUser = { role: 'admin', data: {} };
+                    Swal.fire({ icon: 'success', title: 'เข้าสู่ระบบ Admin สำเร็จ', timer: 1000, showConfirmButton: false }).then(() => navigate('admin_dash'));
                 }
             });
         }
