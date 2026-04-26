@@ -304,8 +304,9 @@
         // --- Student Views ---
         function getStudentDashboard() {
             const s = currentUser.data;
-            const myHistory = appData.checkinHistory.filter(h => h.studentId == s.id);
-            const myRequests = appData.leaveRequests.filter(r => r.studentId == s.id);
+            // กรองข้อมูลด้วย String() ป้องกันปัญหา Type Mismatch และจำกัดการแสดงผลที่ 7 แถวล่าสุด
+            const myHistory = appData.checkinHistory.filter(h => String(h.studentId) === String(s.id)).slice(0, 7);
+            const myRequests = appData.leaveRequests.filter(r => String(r.studentId) === String(s.id)).slice(0, 7);
             
             return `
                 <div class="mb-6">
@@ -592,7 +593,8 @@
 
         function getGuardianRequests() {
             const pendingReqs = appData.leaveRequests.filter(r => r.status === 'pending');
-            const historyReqs = appData.leaveRequests.filter(r => r.status !== 'pending');
+            // จำกัดประวัติการขออนุญาตที่เคยทำรายการไปแล้วให้แสดงผลแค่ 7 แถวล่าสุด
+            const historyReqs = appData.leaveRequests.filter(r => r.status !== 'pending').slice(0, 7);
 
             const renderRow = (r, isPending) => `
                 <tr class="border-b hover:bg-gray-50">
@@ -1380,8 +1382,8 @@
                         : '<span class="text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded border border-yellow-200 text-xs font-bold">รออนุมัติ</span>')
             }));
 
-            // นำมารวมกันและเรียงลำดับจากใหม่ไปเก่า
-            const combinedHistory = [...checkins, ...leaves].sort((a, b) => b.date - a.date);
+            // นำมารวมกันและเรียงลำดับจากใหม่ไปเก่า พร้อมจำกัดให้แสดงแค่ 7 รายการ
+            const combinedHistory = [...checkins, ...leaves].sort((a, b) => b.date - a.date).slice(0, 7);
 
             let historyHtml = '';
             if (combinedHistory.length === 0) {
