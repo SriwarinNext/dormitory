@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SW-Dormitory | ระบบหอพักนักเรียน</title>
+    
+    <!-- ฟอนต์ Kanit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- SweetAlert2 -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Kanit', 'sans-serif'],
+                    },
+                    colors: {
+                        primary: '#ec4899', // Pink 500
+                        secondary: '#3b82f6', // Blue 500
+                        dark: '#0f172a'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { font-family: 'Kanit', sans-serif; background-color: #f3f4f6; }
+        .bg-gradient-theme { background: linear-gradient(135deg, #ec4899 0%, #3b82f6 100%); }
+        .text-gradient { background: linear-gradient(135deg, #ec4899 0%, #3b82f6 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .glass-effect { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px); }
+        
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen text-gray-800">
+
+    <div id="app" class="flex-grow flex flex-col"></div>
+
+    <!-- Minimalist Footer -->
+    <footer class="mt-auto py-8 text-center text-gray-400 text-sm font-medium bg-transparent">
+        <div class="flex flex-col items-center justify-center gap-2">
+            <div class="flex items-center gap-2">
+                <img src="https://img2.pic.in.th/logo-SW.png" alt="Logo" class="w-5 h-5 grayscale opacity-70">
+                <span>โรงเรียนศรีวารินทร์</span>
+            </div>
+            <p>ระบบหอพักนักเรียน - สพม. นราธิวาส</p>
+            <p class="text-xs mt-1">&lt;\dev&gt; อับดุลฮากิม อ๊ะหมะ</p>
+        </div>
+    </footer>
+
+    <script>
+        // ==========================================
+        // 1. Mock Data (จำลองข้อมูล)
+        // ==========================================
+        const LOGO_URL = "https://img2.pic.in.th/logo-SW.png";
+        const ADMIN_PIN = "999999";
+
+        let systemSettings = {
+            targetLat: 6.4255, 
+            targetLng: 101.8252,
+            radius: 50 // รัศมีที่อนุญาต (เมตร)
+        };
+
+        let mockGuardians = [
+            { id: "G001", name: "ครูสมปอง ดูแลดี", pin: "123456" },
+            { id: "G002", name: "ครูมาลี ใจเย็น", pin: "654321" }
+        ];
+
+        let mockStudents = [
+            { id: "65001", name: "นาย สมชาย ใจดี", phone: "0811111111", room: "101", bed: "A1", score: 100, status: "in", latestPhoto: null, scoreHistory: [] },
+            { id: "65002", name: "นางสาว สมหญิง รักเรียน", phone: "0822222222", room: "201", bed: "B1", score: 95, status: "out", latestPhoto: null, scoreHistory: [{ date: new Date().toISOString(), oldScore: 100, newScore: 95, reason: "ไม่ทำเวรทำความสะอาด" }] },
+            { id: "65003", name: "นาย สมศักดิ์ เก่งกาจ", phone: "0833333333", room: "102", bed: "A2", score: 80, status: "in", latestPhoto: null, scoreHistory: [{ date: new Date().toISOString(), oldScore: 100, newScore: 80, reason: "ทะเลาะวิวาท" }] },
+        ];
+
+        let mockRequests = [
+            { id: "REQ-001", studentId: "65002", studentName: "นางสาว สมหญิง รักเรียน", reason: "กลับบ้านช่วงเสาร์-อาทิตย์", outDate: "2026-04-25T16:00", inDate: "2026-04-27T17:00", status: "approved" },
+            { id: "REQ-002", studentId: "65003", studentName: "นาย สมศักดิ์ เก่งกาจ", reason: "ไปซื้อของใช้ส่วนตัว", outDate: "2026-04-28T16:00", inDate: "2026-04-28T19:00", status: "pending" }
+        ];
+
+        let mockCheckinHistory = [];
+
+        // ==========================================
+        // 2. State Management
+        // ==========================================
+        let currentUser = null; 
+        let currentView = 'login'; 
+        let loginTab = 'student'; 
+        let cameraStream = null;
+        let currentPosition = null;
+
+        // ==========================================
+        // 3. Core Functions
+        // ==========================================
+        function render() {
+            const appDiv = document.getElementById('app');
+            appDiv.innerHTML = ''; 
+
+            if (!currentUser) {
+                appDiv.innerHTML = getLoginView();
+            } else {
+                appDiv.innerHTML += getNavbar();
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'container mx-auto px-4 py-8 flex-grow';
+                
+                if (currentUser.role === 'student') {
+                    if (currentView === 'student_dash') contentDiv.innerHTML = getStudentDashboard();
+                    else if (currentView === 'student_checkin') contentDiv.innerHTML = getStudentCheckInOut();
+                    else if (currentView === 'student_leave') contentDiv.innerHTML = getStudentLeave();
+                } else if (currentUser.role === 'guardian') {
+                    if (currentView === 'guardian_dash') contentDiv.innerHTML = getGuardianDashboard();
+                    else if (currentView === 'guardian_req') contentDiv.innerHTML = getGuardianRequests();
+                } else if (currentUser.role === 'admin') {
+                    if (currentView === 'admin_dash') contentDiv.innerHTML = getAdminDashboard();
+                }
+                
+                appDiv.appendChild(contentDiv);
+            }
+
+            // ระบบจัดการกล้อง
+            if (currentView === 'student_checkin' && currentUser && currentUser.data.status === 'out') {
+                startCamera();
+            } else {
+                stopCamera();
+            }
+        }
+
+        function navigate(view) {
+            currentView = view;
+            render();
+        }
+
+        // ==========================================
+        // 4. View Generators (UI Templates)
+        // ==========================================
+        function getNavbar() {
+            const role = currentUser.role;
+            let name = '';
+            let menuItems = '';
+
+            if (role === 'student') {
+                name = currentUser.data.name;
+                menuItems = `
+                    <button onclick="navigate('student_dash')" class="hover:bg-white/20 px-3 py-2 rounded transition ${currentView === 'student_dash' ? 'bg-white/20' : ''}">หน้าแรก</button>
+                    <button onclick="navigate('student_checkin')" class="hover:bg-white/20 px-3 py-2 rounded transition ${currentView === 'student_checkin' ? 'bg-white/20' : ''}">เข้า-ออกหอพัก</button>
+                    <button onclick="navigate('student_leave')" class="hover:bg-white/20 px-3 py-2 rounded transition ${currentView === 'student_leave' ? 'bg-white/20' : ''}">ขออนุญาต</button>
+                `;
+            } else if (role === 'guardian') {
+                name = currentUser.data.name;
+                menuItems = `
+                    <button onclick="navigate('guardian_dash')" class="hover:bg-white/20 px-3 py-2 rounded transition ${currentView === 'guardian_dash' ? 'bg-white/20' : ''}">แผงควบคุม</button>
+                    <button onclick="navigate('guardian_req')" class="hover:bg-white/20 px-3 py-2 rounded transition ${currentView === 'guardian_req' ? 'bg-white/20' : ''}">จัดการคำขอ</button>
+                `;
+            } else if (role === 'admin') {
+                name = 'System Admin';
+                menuItems = `
+                    <button onclick="navigate('admin_dash')" class="bg-white/20 px-3 py-2 rounded transition">จัดการระบบ</button>
+                `;
+            }
+
+            const roleLabels = { 'student': 'นักเรียนหอพัก', 'guardian': 'ผู้ดูแลหอพัก', 'admin': 'ผู้ดูแลระบบ' };
+
+            return `
+                <nav class="bg-gradient-theme text-white shadow-lg sticky top-0 z-50">
+                    <div class="container mx-auto px-4 py-3 flex flex-wrap justify-between items-center">
+                        <div class="flex items-center gap-3 cursor-pointer" onclick="navigate('${role}_dash')">
+                            <img src="${LOGO_URL}" alt="Logo" class="h-10 w-10 bg-white rounded-full p-1 shadow">
+                            <span class="font-bold text-xl hidden sm:block">SW-Dormitory</span>
+                        </div>
+                        <div class="flex items-center gap-2 md:gap-6 overflow-x-auto text-sm md:text-base">
+                            ${menuItems}
+                        </div>
+                        <div class="flex items-center gap-3 mt-3 w-full md:w-auto md:mt-0 justify-end border-t border-white/20 md:border-none pt-2 md:pt-0">
+                            <div class="text-right leading-tight hidden md:block">
+                                <p class="text-sm font-semibold">${name}</p>
+                                <p class="text-xs text-blue-200">${roleLabels[role]}</p>
+                            </div>
+                            <button onclick="handleLogout()" class="bg-white text-pink-600 hover:bg-gray-100 px-4 py-2 rounded-full text-sm font-semibold shadow transition flex items-center gap-2">
+                                <i class="fa-solid fa-right-from-bracket"></i> <span class="hidden sm:inline">ออกจากระบบ</span>
+                            </button>
+                        </div>
+                    </div>
+                </nav>
+            `;
+        }
+
+        function getLoginView() {
+            return `
+                <div class="flex-grow flex flex-col items-center justify-center p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative z-10">
+                        <div class="bg-gradient-theme p-6 text-center text-white">
+                            <img src="${LOGO_URL}" alt="Logo" class="h-20 w-20 mx-auto bg-white rounded-full p-2 shadow-md mb-3 border-2 border-pink-200">
+                            <h1 class="text-2xl font-bold">SW-Dormitory</h1>
+                            <p class="text-sm opacity-90 mt-1">ระบบจัดการหอพักนักเรียน</p>
+                        </div>
+
+                        <div class="flex border-b">
+                            <button onclick="switchLoginTab('student')" class="flex-1 py-3 font-semibold transition ${loginTab === 'student' ? 'text-pink-600 border-b-2 border-pink-600 bg-pink-50' : 'text-gray-500 hover:text-pink-400'}">
+                                <i class="fa-solid fa-user-graduate mr-2"></i>นักเรียน
+                            </button>
+                            <button onclick="switchLoginTab('guardian')" class="flex-1 py-3 font-semibold transition ${loginTab === 'guardian' ? 'text-blue-600 border-b-2 border-blue-600 bg-blue-50' : 'text-gray-500 hover:text-blue-400'}">
+                                <i class="fa-solid fa-user-tie mr-2"></i>ผู้ดูแล
+                            </button>
+                        </div>
+
+                        <div class="p-6">
+                            ${loginTab === 'student' ? `
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2">รหัสนักเรียน (5 หลัก)</label>
+                                    <div class="relative">
+                                        <i class="fa-solid fa-id-card absolute left-3 top-3.5 text-gray-400"></i>
+                                        <input type="text" id="studentIdInput" class="w-full pl-10 pr-3 py-3 rounded-lg bg-gray-50 border focus:bg-white focus:ring-2 focus:ring-pink-500 outline-none transition" placeholder="เช่น 65001" onkeypress="if(event.key === 'Enter') handleStudentLogin()">
+                                    </div>
+                                    <button onclick="handleStudentLogin()" class="w-full mt-6 bg-gradient-theme text-white font-bold py-3 px-4 rounded-lg shadow hover:shadow-lg transform hover:-translate-y-0.5 transition">
+                                        เข้าสู่ระบบนักเรียน
+                                    </button>
+                                </div>
+                            ` : `
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2">รหัสประจำตัวผู้ดูแล</label>
+                                    <div class="relative mb-4">
+                                        <i class="fa-solid fa-user absolute left-3 top-3.5 text-gray-400"></i>
+                                        <input type="text" id="guardianIdInput" class="w-full pl-10 pr-3 py-3 rounded-lg bg-gray-50 border focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="เช่น G001">
+                                    </div>
+                                    <label class="block text-gray-700 text-sm font-bold mb-2">รหัส PIN (6 หลัก)</label>
+                                    <div class="relative">
+                                        <i class="fa-solid fa-lock absolute left-3 top-3.5 text-gray-400"></i>
+                                        <input type="password" id="guardianPinInput" class="w-full pl-10 pr-3 py-3 rounded-lg bg-gray-50 border focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder="******" onkeypress="if(event.key === 'Enter') handleGuardianLogin()">
+                                    </div>
+                                    <button onclick="handleGuardianLogin()" class="w-full mt-6 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold py-3 px-4 rounded-lg shadow hover:shadow-lg transform hover:-translate-y-0.5 transition">
+                                        เข้าสู่ระบบผู้ดูแล
+                                    </button>
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                    
+                    <button onclick="promptAdminLogin()" class="mt-6 text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1 transition">
+                        <i class="fa-solid fa-shield-halved"></i> สำหรับผู้ดูแลระบบ
+                    </button>
+                </div>
+            `;
+        }
+
+        // --- Student Views ---
+        function getStudentDashboard() {
+            const s = currentUser.data;
+            const myHistory = mockCheckinHistory.filter(h => h.studentId === s.id);
+            const myRequests = mockRequests.filter(r => r.studentId === s.id);
+            
+            return `
+                <div class="mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">แผงควบคุมนักเรียน</h2>
+                    <p class="text-gray-500">ยินดีต้อนรับ, ${s.name}</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    <!-- Profile Card -->
+                    <div class="bg-white rounded-xl shadow-md p-6 border-t-4 border-pink-500 md:col-span-2 flex flex-col md:flex-row items-center gap-6">
+                        <img src="https://ui-avatars.com/api/?name=${encodeURIComponent(s.name)}&background=ec4899&color=fff&size=120" class="rounded-full shadow-lg border-4 border-white">
+                        <div class="w-full">
+                            <div class="grid grid-cols-2 gap-4 text-sm md:text-base">
+                                <div class="bg-gray-50 p-3 rounded-lg"><p class="text-gray-500 text-xs">รหัส</p><p class="font-bold">${s.id}</p></div>
+                                <div class="bg-gray-50 p-3 rounded-lg"><p class="text-gray-500 text-xs">เบอร์ติดต่อ</p><p class="font-bold">${s.phone || '-'}</p></div>
+                                <div class="bg-gray-50 p-3 rounded-lg"><p class="text-gray-500 text-xs">ห้องพัก</p><p class="font-bold text-blue-600">${s.room} / ${s.bed}</p></div>
+                                <div class="bg-gray-50 p-3 rounded-lg col-span-2"><p class="text-gray-500 text-xs">สถานะปัจจุบัน</p>
+                                    <p class="text-lg font-bold ${s.status === 'in' ? 'text-green-500' : 'text-orange-500'}">
+                                        <i class="fa-solid ${s.status === 'in' ? 'fa-house-user' : 'fa-person-walking-arrow-right'}"></i> 
+                                        ${s.status === 'in' ? 'เช็คอิน (อยู่ในหอพัก)' : 'เช็คเอาท์ (อยู่นอกหอพัก)'}
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Score Card -->
+                    <div class="bg-gradient-theme rounded-xl shadow-md p-6 text-white text-center flex flex-col justify-center relative overflow-hidden">
+                        <i class="fa-solid fa-star absolute -right-4 -bottom-4 text-8xl text-white opacity-10"></i>
+                        <p class="text-lg opacity-90 mb-2">คะแนนพฤติกรรม</p>
+                        <div class="text-6xl font-bold mb-2 z-10">${s.score}<span class="text-2xl font-normal">/100</span></div>
+                        <div class="w-full bg-white/30 rounded-full h-2 mt-2 z-10">
+                            <div class="bg-white h-2 rounded-full" style="width: ${s.score}%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History In/Out -->
+                <div class="bg-white rounded-xl shadow-md overflow-hidden mb-6">
+                    <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
+                        <h3 class="font-bold text-gray-700"><i class="fa-solid fa-clock-rotate-left mr-2"></i>ประวัติการเข้า-ออกหอพัก</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-600 text-sm">
+                                    <th class="p-4">วัน-เวลา</th>
+                                    <th class="p-4">ประเภท</th>
+                                    <th class="p-4 text-center">รูปถ่าย (ตอนเข้า)</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm">
+                                ${myHistory.length === 0 ? `<tr><td colspan="3" class="p-6 text-center text-gray-400">ยังไม่มีประวัติการทำรายการ</td></tr>` : 
+                                  myHistory.map(h => `
+                                    <tr class="border-b hover:bg-gray-50">
+                                        <td class="p-4 font-medium text-gray-700">${formatDate(h.timestamp)}</td>
+                                        <td class="p-4">
+                                            ${h.type === 'in' 
+                                                ? '<span class="text-green-600 bg-green-50 px-2 py-1 rounded text-xs font-bold"><i class="fa-solid fa-arrow-right-to-bracket mr-1"></i>เช็คอินเข้า</span>' 
+                                                : '<span class="text-orange-500 bg-orange-50 px-2 py-1 rounded text-xs font-bold"><i class="fa-solid fa-arrow-right-from-bracket mr-1"></i>เช็คเอาท์ออก</span>'}
+                                        </td>
+                                        <td class="p-4 text-center">
+                                            ${h.type === 'in' && h.photoData 
+                                                ? `<button onclick="viewPhoto('${h.photoData}')" class="text-blue-500 hover:text-blue-700"><i class="fa-solid fa-image fa-lg"></i></button>` 
+                                                : '<span class="text-gray-300">-</span>'}
+                                        </td>
+                                    </tr>
+                                  `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Leave Request History -->
+                <div class="bg-white rounded-xl shadow-md overflow-hidden">
+                    <div class="p-4 bg-gray-50 border-b flex justify-between items-center">
+                        <h3 class="font-bold text-gray-700"><i class="fa-solid fa-paper-plane mr-2"></i>ประวัติการขออนุญาตกลับบ้าน/ออกนอกบริเวณ</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-600 text-sm">
+                                    <th class="p-4">เหตุผล</th>
+                                    <th class="p-4">วัน-เวลา ออก</th>
+                                    <th class="p-4">วัน-เวลา กลับ</th>
+                                    <th class="p-4">สถานะ</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm">
+                                ${myRequests.length === 0 ? `<tr><td colspan="4" class="p-4 text-center text-gray-500">ไม่มีประวัติการขออนุญาต</td></tr>` : 
+                                  myRequests.map(r => `
+                                    <tr class="border-b hover:bg-gray-50">
+                                        <td class="p-4">${r.reason}</td>
+                                        <td class="p-4">${formatDate(r.outDate)}</td>
+                                        <td class="p-4">${formatDate(r.inDate)}</td>
+                                        <td class="p-4">
+                                            ${r.status === 'pending' ? '<span class="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs"><i class="fa-solid fa-hourglass-half mr-1"></i>รออนุมัติ</span>' : ''}
+                                            ${r.status === 'approved' ? '<span class="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs"><i class="fa-solid fa-check mr-1"></i>อนุมัติ</span>' : ''}
+                                            ${r.status === 'rejected' ? '<span class="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs"><i class="fa-solid fa-xmark mr-1"></i>ไม่อนุมัติ</span>' : ''}
+                                        </td>
+                                    </tr>
+                                  `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getStudentCheckInOut() {
+            const status = currentUser.data.status;
+            
+            if (status === 'in') {
+                return `
+                    <div class="max-w-md mx-auto text-center mt-10">
+                        <div class="bg-white rounded-2xl shadow-xl p-8">
+                            <div class="w-24 h-24 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <i class="fa-solid fa-person-walking-arrow-right text-5xl text-orange-500"></i>
+                            </div>
+                            <h2 class="text-3xl font-bold text-gray-800 mb-2">เช็คเอาท์ออกหอพัก</h2>
+                            <p class="text-gray-500 mb-8">สถานะปัจจุบันของคุณคือ "อยู่ในหอพัก"<br>กดปุ่มด้านล่างเพื่อบันทึกการออกนอกหอพัก</p>
+                            
+                            <button onclick="submitCheckout()" class="w-full bg-orange-500 hover:bg-orange-600 text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:shadow-xl transition transform hover:-translate-y-1">
+                                <i class="fa-solid fa-door-open mr-2"></i> ยืนยันการเช็คเอาท์
+                            </button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="max-w-2xl mx-auto">
+                        <div class="text-center mb-6">
+                            <h2 class="text-2xl font-bold text-gray-800">ระบบเช็คอินเข้าหอพัก</h2>
+                            <p class="text-gray-500">กรุณาถ่ายภาพเพื่อยืนยันตัวตนและพิกัด GPS</p>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-md p-6">
+                            <div class="relative bg-gray-900 rounded-lg overflow-hidden aspect-video flex items-center justify-center mb-4 border-2 border-gray-200">
+                                <video id="checkinVideo" class="w-full h-full object-cover" autoplay playsinline></video>
+                                <canvas id="checkinCanvas" class="hidden w-full h-full object-cover absolute top-0 left-0"></canvas>
+                                <div id="cameraLoading" class="absolute text-white text-center">
+                                    <i class="fa-solid fa-spinner fa-spin text-3xl mb-2"></i><br>กำลังเปิดกล้อง...
+                                </div>
+                            </div>
+
+                            <div class="bg-gray-50 border border-gray-100 p-4 rounded-lg mb-6 flex items-start gap-3">
+                                <div class="text-blue-500 mt-1"><i class="fa-solid fa-location-crosshairs fa-lg"></i></div>
+                                <div class="w-full">
+                                    <p class="text-sm font-semibold text-gray-700">ตรวจสอบพิกัดหอพัก</p>
+                                    <p id="gpsStatus" class="text-xs text-gray-500">กำลังค้นหาพิกัดของคุณ...</p>
+                                    <div class="mt-2 text-[10px] text-gray-400">พิกัดเป้าหมาย: ${systemSettings.targetLat}, ${systemSettings.targetLng} (รัศมี ${systemSettings.radius} ม.)</div>
+                                </div>
+                            </div>
+
+                            <div class="flex gap-3">
+                                <button id="btnCapture" onclick="takePhoto()" class="flex-1 bg-gradient-theme text-white py-3 rounded-lg font-bold shadow hover:shadow-lg transition">
+                                    <i class="fa-solid fa-camera mr-2"></i> ถ่ายภาพเช็คอิน
+                                </button>
+                                <button id="btnRetake" onclick="retakePhoto()" class="hidden flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-bold shadow hover:bg-gray-300 transition">
+                                    <i class="fa-solid fa-rotate-right mr-2"></i> ถ่ายใหม่
+                                </button>
+                                <button id="btnSubmitCheckin" onclick="submitCheckin()" class="hidden flex-1 bg-green-500 text-white py-3 rounded-lg font-bold shadow hover:bg-green-600 transition">
+                                    <i class="fa-solid fa-check mr-2"></i> ยืนยันเข้าหอ
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function getStudentLeave() {
+            const s = currentUser.data;
+            return `
+                <div class="max-w-2xl mx-auto">
+                    <div class="text-center mb-6">
+                        <h2 class="text-2xl font-bold text-gray-800">ขออนุญาตกลับบ้าน/ออกนอกบริเวณ</h2>
+                    </div>
+                    <div class="bg-white rounded-xl shadow-md p-6">
+                        <div class="bg-blue-50 border border-blue-100 p-4 rounded-lg mb-6 text-sm text-blue-800 flex items-center gap-3">
+                            <i class="fa-solid fa-circle-info text-blue-500 text-xl"></i>
+                            <div>
+                                <p><strong>ข้อมูลผู้ขอ:</strong> ${s.name} (รหัส: ${s.id})</p>
+                                <p>ห้อง: ${s.room} | เตียง: ${s.bed} | คะแนนพฤติกรรม: ${s.score}/100</p>
+                            </div>
+                        </div>
+                        <form onsubmit="submitLeave(event)">
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">เหตุผลที่ขออนุญาต <span class="text-red-500">*</span></label>
+                                <textarea id="leaveReason" required class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-pink-500 outline-none" rows="3"></textarea>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                <div><label class="block text-gray-700 text-sm font-bold mb-2">วันออก <span class="text-red-500">*</span></label><input type="datetime-local" id="leaveOut" required class="w-full p-3 border rounded-lg outline-none"></div>
+                                <div><label class="block text-gray-700 text-sm font-bold mb-2">วันกลับ <span class="text-red-500">*</span></label><input type="datetime-local" id="leaveIn" required class="w-full p-3 border rounded-lg outline-none"></div>
+                            </div>
+                            <button type="submit" class="w-full bg-gradient-theme text-white py-3 rounded-lg font-bold shadow-lg transition mt-4"><i class="fa-solid fa-paper-plane mr-2"></i> ส่งคำขอ</button>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- Guardian Views ---
+        function getGuardianDashboard() {
+            const total = mockStudents.length;
+            const checkedIn = mockStudents.filter(s => s.status === 'in').length;
+            const outside = total - checkedIn;
+            
+            return `
+                <div class="mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">แผงควบคุมสถิติ</h2>
+                    <p class="text-gray-500">ข้อมูลนักเรียนและการเช็คอิน</p>
+                </div>
+
+                <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+                    <div class="bg-white p-6 rounded-xl shadow border-l-4 border-blue-500">
+                        <div class="text-gray-500 text-sm">นักเรียนทั้งหมด</div>
+                        <div class="text-3xl font-bold">${total} คน</div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow border-l-4 border-green-500">
+                        <div class="text-gray-500 text-sm">เช็คอินอยู่ในหอพัก</div>
+                        <div class="text-3xl font-bold text-green-600">${checkedIn} คน</div>
+                    </div>
+                    <div class="bg-white p-6 rounded-xl shadow border-l-4 border-orange-500 col-span-2 md:col-span-1">
+                        <div class="text-gray-500 text-sm">กลับบ้าน/ออกนอกบริเวณ</div>
+                        <div class="text-3xl font-bold text-orange-600">${outside} คน</div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-md overflow-hidden">
+                    <div class="p-4 bg-gray-50 border-b flex flex-col sm:flex-row justify-between items-center gap-3">
+                        <h3 class="font-bold text-gray-700 w-full sm:w-auto"><i class="fa-solid fa-users mr-2"></i>รายชื่อนักเรียน</h3>
+                        <div class="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+                            <div class="relative w-full sm:w-64">
+                                <i class="fa-solid fa-search absolute left-3 top-2.5 text-gray-400"></i>
+                                <input type="text" id="searchStudentInput" onkeyup="filterGuardianStudents()" placeholder="ค้นหา รหัส, ชื่อ, เตียง..." class="w-full pl-9 pr-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <button onclick="openAddStudentModal()" class="w-full sm:w-auto bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm font-semibold shadow transition flex items-center justify-center gap-1 whitespace-nowrap">
+                                <i class="fa-solid fa-user-plus"></i> <span class="hidden sm:inline">เพิ่มนักเรียน</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-100 text-gray-600 text-sm">
+                                    <th class="p-4">รหัส/ชื่อ/เบอร์</th>
+                                    <th class="p-4">ห้อง/เตียง</th>
+                                    <th class="p-4 text-center">คะแนน</th>
+                                    <th class="p-4">สถานะล่าสุด</th>
+                                    <th class="p-4 text-center">รูปเช็คอิน</th>
+                                    <th class="p-4 text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm" id="guardianStudentTableBody">
+                                ${mockStudents.map(s => `
+                                    <tr class="border-b hover:bg-gray-50">
+                                        <td class="p-4"><div class="font-bold">${s.name}</div><div class="text-xs text-gray-500">รหัส: ${s.id} | โทร: ${s.phone || '-'}</div></td>
+                                        <td class="p-4 text-gray-600">${s.room} / ${s.bed}</td>
+                                        <td class="p-4 text-center">
+                                            <button onclick="viewScoreHistory('${s.id}')" class="font-bold text-pink-600 hover:text-pink-800 underline decoration-pink-300 underline-offset-2 px-2 py-1 rounded hover:bg-pink-50 transition" title="คลิกดูประวัติคะแนน">${s.score}</button>
+                                        </td>
+                                        <td class="p-4">
+                                            ${s.status === 'in' 
+                                                ? '<span class="text-green-600 bg-green-50 px-2 py-1 rounded text-xs font-bold"><i class="fa-solid fa-house-circle-check mr-1"></i>ในหอพัก</span>' 
+                                                : '<span class="text-orange-500 bg-orange-50 px-2 py-1 rounded text-xs font-bold"><i class="fa-solid fa-person-walking-arrow-right mr-1"></i>นอกหอพัก</span>'}
+                                        </td>
+                                        <td class="p-4 text-center">
+                                            ${s.status === 'in' && s.latestPhoto 
+                                                ? `<button onclick="viewPhoto('${s.latestPhoto}')" class="bg-blue-100 text-blue-600 hover:bg-blue-200 px-3 py-1 rounded-full text-xs font-semibold transition"><i class="fa-solid fa-camera-retro mr-1"></i>ดูรูป</button>` 
+                                                : '<span class="text-gray-300 text-xs">-</span>'}
+                                        </td>
+                                        <td class="p-4 text-center">
+                                            <button onclick="editScore('${s.id}')" class="text-blue-500 hover:text-blue-700"><i class="fa-solid fa-pen-to-square"></i> ปรับคะแนน</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getGuardianRequests() {
+            const pendingReqs = mockRequests.filter(r => r.status === 'pending');
+            const historyReqs = mockRequests.filter(r => r.status !== 'pending');
+
+            const renderRow = (r, isPending) => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="p-4">
+                        <div class="font-semibold">${r.studentName}</div>
+                        <div class="text-xs text-gray-500">รหัส: ${r.studentId}</div>
+                    </td>
+                    <td class="p-4 text-gray-700">${r.reason}</td>
+                    <td class="p-4 text-xs text-gray-500">
+                        <div><strong class="text-pink-600">ออก:</strong> ${formatDate(r.outDate)}</div>
+                        <div class="mt-1"><strong class="text-blue-600">กลับ:</strong> ${formatDate(r.inDate)}</div>
+                    </td>
+                    ${isPending ? `
+                        <td class="p-4 text-center">
+                            <div class="flex flex-col sm:flex-row justify-center gap-2">
+                                <button onclick="handleRequest('${r.id}', 'approved')" class="bg-green-500 text-white px-3 py-1.5 rounded hover:bg-green-600 transition text-sm shadow"><i class="fa-solid fa-check mr-1"></i>อนุญาต</button>
+                                <button onclick="handleRequest('${r.id}', 'rejected')" class="bg-red-500 text-white px-3 py-1.5 rounded hover:bg-red-600 transition text-sm shadow"><i class="fa-solid fa-xmark mr-1"></i>ไม่อนุญาต</button>
+                            </div>
+                        </td>
+                    ` : `
+                        <td class="p-4 text-center">
+                            ${r.status === 'approved' 
+                                ? '<span class="text-green-600 font-semibold bg-green-50 px-3 py-1 rounded-full text-xs border border-green-200"><i class="fa-solid fa-check-circle mr-1"></i>อนุญาตแล้ว</span>' 
+                                : '<span class="text-red-600 font-semibold bg-red-50 px-3 py-1 rounded-full text-xs border border-red-200"><i class="fa-solid fa-times-circle mr-1"></i>ไม่อนุญาต</span>'}
+                        </td>
+                    `}
+                </tr>
+            `;
+
+            return `
+                <div class="mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">จัดการคำขออนุญาต</h2>
+                    <p class="text-gray-500">อนุมัติการกลับบ้านและออกนอกบริเวณ พร้อมประวัติการทำรายการ</p>
+                </div>
+
+                <!-- คำขอรออนุมัติ -->
+                <div class="bg-white rounded-xl shadow-md overflow-hidden mb-8 border-t-4 border-yellow-400">
+                    <div class="p-4 bg-yellow-50 border-b border-yellow-100 flex justify-between items-center">
+                        <h3 class="font-bold text-yellow-800"><i class="fa-solid fa-bell mr-2"></i>รอการอนุมัติ (${pendingReqs.length})</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-50 text-gray-600 text-sm border-b">
+                                    <th class="p-4">นักเรียน</th>
+                                    <th class="p-4">เหตุผล</th>
+                                    <th class="p-4">กำหนดการ</th>
+                                    <th class="p-4 text-center">จัดการ</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm">
+                                ${pendingReqs.length === 0 ? `<tr><td colspan="4" class="p-8 text-center text-gray-400">ไม่มีคำขอที่รออนุมัติ</td></tr>` : pendingReqs.map(r => renderRow(r, true)).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ประวัติการจัดการ -->
+                <div class="bg-white rounded-xl shadow-md overflow-hidden border-t-4 border-gray-300 opacity-90">
+                    <div class="p-4 bg-gray-50 border-b">
+                        <h3 class="font-bold text-gray-600"><i class="fa-solid fa-history mr-2"></i>ประวัติการขออนุญาต (อนุญาต/ไม่อนุญาต)</h3>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-50 text-gray-600 text-sm border-b">
+                                    <th class="p-4">นักเรียน</th>
+                                    <th class="p-4">เหตุผล</th>
+                                    <th class="p-4">กำหนดการ</th>
+                                    <th class="p-4 text-center">สถานะ</th>
+                                </tr>
+                            </thead>
+                            <tbody class="text-sm">
+                                ${historyReqs.length === 0 ? `<tr><td colspan="4" class="p-8 text-center text-gray-400">ไม่มีประวัติการทำรายการ</td></tr>` : historyReqs.map(r => renderRow(r, false)).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // --- Admin Views ---
+        function getAdminDashboard() {
+            return `
+                <div class="mb-6">
+                    <h2 class="text-2xl font-bold text-gray-800">จัดการระบบ (Admin)</h2>
+                    <p class="text-gray-500">ตั้งค่าพิกัดหอพักและจัดการข้อมูลผู้ดูแล</p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- GPS Settings -->
+                    <div class="bg-white rounded-xl shadow-md p-6 lg:col-span-1 h-fit">
+                        <h3 class="font-bold text-gray-700 mb-4 border-b pb-2"><i class="fa-solid fa-map-location-dot mr-2 text-blue-500"></i>ตั้งค่าพิกัดเช็คอินหอพัก</h3>
+                        <div class="space-y-4">
+                            <button onclick="autoFetchGPS()" class="w-full bg-gray-100 text-gray-700 border border-gray-300 py-2 rounded font-semibold hover:bg-gray-200 transition mb-2 text-sm">
+                                <i class="fa-solid fa-location-crosshairs mr-2"></i> ดึงพิกัดปัจจุบันอัตโนมัติ
+                            </button>
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1">ละติจูด (Latitude)</label>
+                                <input type="number" step="0.000001" id="adminLat" value="${systemSettings.targetLat}" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1">ลองจิจูด (Longitude)</label>
+                                <input type="number" step="0.000001" id="adminLng" value="${systemSettings.targetLng}" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400">
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-600 mb-1">รัศมีที่อนุญาตให้เช็คอิน (เมตร)</label>
+                                <input type="number" id="adminRadius" value="${systemSettings.radius}" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400">
+                            </div>
+                            <button onclick="saveGPS()" class="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700 transition mt-2">
+                                บันทึกพิกัดและรัศมี
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Manage Guardians -->
+                    <div class="bg-white rounded-xl shadow-md p-6 lg:col-span-2">
+                        <div class="flex justify-between items-center mb-4 border-b pb-2">
+                            <h3 class="font-bold text-gray-700"><i class="fa-solid fa-user-shield mr-2 text-pink-500"></i>ข้อมูลผู้ดูแลหอพัก</h3>
+                            <button onclick="openAddGuardian()" class="bg-pink-500 text-white px-3 py-1.5 rounded text-sm font-semibold hover:bg-pink-600"><i class="fa-solid fa-plus mr-1"></i>เพิ่มผู้ดูแล</button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="bg-gray-50 text-gray-600 text-sm">
+                                        <th class="p-3">รหัสผู้ดูแล</th>
+                                        <th class="p-3">ชื่อ-นามสกุล</th>
+                                        <th class="p-3">รหัส PIN</th>
+                                        <th class="p-3 text-center">จัดการ</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${mockGuardians.map(g => `
+                                        <tr class="border-b hover:bg-gray-50">
+                                            <td class="p-3 font-mono text-blue-600">${g.id}</td>
+                                            <td class="p-3 font-medium">${g.name}</td>
+                                            <td class="p-3 text-gray-500">******</td>
+                                            <td class="p-3 text-center">
+                                                <button onclick="openEditGuardian('${g.id}')" class="text-blue-500 hover:text-blue-700 mr-3"><i class="fa-solid fa-edit"></i></button>
+                                                <button onclick="deleteGuardian('${g.id}')" class="text-red-500 hover:text-red-700"><i class="fa-solid fa-trash"></i></button>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ==========================================
+        // 5. Action Handlers (ฟังก์ชันต่างๆ)
+        // ==========================================
+        
+        function switchLoginTab(tab) { loginTab = tab; render(); }
+
+        function handleStudentLogin() {
+            const id = document.getElementById('studentIdInput').value.trim();
+            const student = mockStudents.find(s => s.id === id);
+            if (student) {
+                currentUser = { role: 'student', data: student };
+                Swal.fire({ title: 'เข้าสู่ระบบสำเร็จ', text: `ยินดีต้อนรับ ${student.name}`, icon: 'success', timer: 1000, showConfirmButton: false }).then(() => navigate('student_dash'));
+            } else {
+                Swal.fire('ข้อผิดพลาด', 'ไม่พบรหัสนักเรียนนี้ในระบบ', 'error');
+            }
+        }
+
+        function handleGuardianLogin() {
+            const id = document.getElementById('guardianIdInput').value.trim();
+            const pin = document.getElementById('guardianPinInput').value;
+            const guardian = mockGuardians.find(g => g.id === id && g.pin === pin);
+            
+            if (guardian) {
+                currentUser = { role: 'guardian', data: guardian };
+                Swal.fire({ title: 'เข้าสู่ระบบสำเร็จ', text: `ยินดีต้อนรับ ${guardian.name}`, icon: 'success', timer: 1000, showConfirmButton: false }).then(() => navigate('guardian_dash'));
+            } else {
+                Swal.fire('ข้อผิดพลาด', 'รหัสประจำตัว หรือ PIN ไม่ถูกต้อง', 'error');
+            }
+        }
+
+        function promptAdminLogin() {
+            Swal.fire({
+                title: 'เข้าสู่ระบบ Admin',
+                input: 'password',
+                inputPlaceholder: 'กรอกรหัสผ่าน Admin',
+                showCancelButton: true,
+                confirmButtonText: 'เข้าสู่ระบบ',
+                cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    if (result.value === ADMIN_PIN) {
+                        currentUser = { role: 'admin', data: {} };
+                        Swal.fire({ icon: 'success', title: 'Admin Logged in', timer: 1000, showConfirmButton: false }).then(() => navigate('admin_dash'));
+                    } else {
+                        Swal.fire('Error', 'รหัสผ่านแอดมินไม่ถูกต้อง (ลอง 999999)', 'error');
+                    }
+                }
+            });
+        }
+
+        function handleLogout() {
+            stopCamera();
+            currentUser = null;
+            navigate('login');
+        }
+
+        // --- Camera & GPS Check-in/out ---
+        async function startCamera() {
+            const video = document.getElementById('checkinVideo');
+            const loading = document.getElementById('cameraLoading');
+            const gpsStatus = document.getElementById('gpsStatus');
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        currentPosition = pos.coords;
+                        if(gpsStatus) gpsStatus.innerHTML = `<span class="text-green-600 font-bold"><i class="fa-solid fa-check"></i> ได้รับพิกัดปัจจุบัน: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}</span>`;
+                    },
+                    (err) => {
+                        if(gpsStatus) gpsStatus.innerHTML = `<span class="text-red-500"><i class="fa-solid fa-triangle-exclamation"></i> ไม่สามารถดึงพิกัดได้ (กรุณาอนุญาต Location)</span>`;
+                    }
+                );
+            }
+
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                if(video) {
+                    video.srcObject = cameraStream;
+                    video.onloadedmetadata = () => {
+                        if(loading) loading.classList.add('hidden');
+                    };
+                }
+            } catch (err) {
+                if(loading) loading.innerHTML = `<i class="fa-solid fa-video-slash text-red-500 text-3xl mb-2"></i><br>เบราว์เซอร์ไม่สามารถเปิดกล้องได้`;
+            }
+        }
+
+        function stopCamera() {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+                cameraStream = null;
+            }
+        }
+
+        function takePhoto() {
+            const video = document.getElementById('checkinVideo');
+            const canvas = document.getElementById('checkinCanvas');
+            canvas.width = video.videoWidth; 
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            video.classList.add('hidden'); 
+            canvas.classList.remove('hidden');
+            
+            document.getElementById('btnCapture').classList.add('hidden');
+            document.getElementById('btnRetake').classList.remove('hidden');
+            document.getElementById('btnSubmitCheckin').classList.remove('hidden');
+        }
+
+        function retakePhoto() {
+            document.getElementById('checkinVideo').classList.remove('hidden');
+            document.getElementById('checkinCanvas').classList.add('hidden');
+            
+            document.getElementById('btnCapture').classList.remove('hidden');
+            document.getElementById('btnRetake').classList.add('hidden');
+            document.getElementById('btnSubmitCheckin').classList.add('hidden');
+        }
+
+        function submitCheckin() {
+            if (!currentPosition) return Swal.fire('แจ้งเตือน', 'กรุณารอระบบดึงพิกัด GPS ก่อน', 'warning');
+
+            // คำนวณระยะห่าง (Geofencing)
+            const distance = calculateDistance(
+                currentPosition.latitude, currentPosition.longitude,
+                systemSettings.targetLat, systemSettings.targetLng
+            );
+
+            if (distance > systemSettings.radius) {
+                return Swal.fire({
+                    title: 'เช็คอินไม่สำเร็จ',
+                    html: `คุณอยู่นอกพื้นที่หอพัก<br>ระยะห่างปัจจุบัน: <b>${Math.round(distance)} เมตร</b><br><span class="text-sm text-gray-500">(อนุญาตเฉพาะในรัศมี ${systemSettings.radius} เมตร)</span>`,
+                    icon: 'error'
+                });
+            }
+
+            const canvas = document.getElementById('checkinCanvas');
+            const photoDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+
+            Swal.fire({
+                title: 'กำลังบันทึกข้อมูล...',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                    setTimeout(() => {
+                        const sIndex = mockStudents.findIndex(s => s.id === currentUser.data.id);
+                        if(sIndex > -1) {
+                            mockStudents[sIndex].status = 'in';
+                            mockStudents[sIndex].latestPhoto = photoDataUrl;
+                        }
+                        currentUser.data.status = 'in';
+
+                        mockCheckinHistory.unshift({
+                            id: Date.now(),
+                            studentId: currentUser.data.id,
+                            type: 'in',
+                            timestamp: new Date().toISOString(),
+                            photoData: photoDataUrl
+                        });
+
+                        stopCamera();
+                        Swal.fire('เช็คอินสำเร็จ!', 'บันทึกรูปและพิกัดเรียบร้อย', 'success').then(() => navigate('student_dash'));
+                    }, 1500);
+                }
+            });
+        }
+
+        function submitCheckout() {
+            Swal.fire({
+                title: 'ยืนยันการเช็คเอาท์?',
+                text: 'คุณกำลังจะบันทึกการออกนอกหอพัก',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#f97316',
+                confirmButtonText: 'เช็คเอาท์',
+                cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    Swal.fire({
+                        title: 'กำลังบันทึก...',
+                        didOpen: () => {
+                            Swal.showLoading();
+                            setTimeout(() => {
+                                const sIndex = mockStudents.findIndex(s => s.id === currentUser.data.id);
+                                if(sIndex > -1) mockStudents[sIndex].status = 'out';
+                                currentUser.data.status = 'out';
+
+                                mockCheckinHistory.unshift({
+                                    id: Date.now(),
+                                    studentId: currentUser.data.id,
+                                    type: 'out',
+                                    timestamp: new Date().toISOString(),
+                                    photoData: null 
+                                });
+
+                                Swal.fire('เช็คเอาท์สำเร็จ!', 'บันทึกการออกหอพักเรียบร้อย', 'success').then(() => navigate('student_dash'));
+                            }, 1000);
+                        }
+                    });
+                }
+            });
+        }
+
+        function viewPhoto(photoDataUrl) {
+            Swal.fire({
+                title: 'รูปถ่ายตอนเช็คอิน',
+                imageUrl: photoDataUrl,
+                imageAlt: 'Check-in Photo',
+                imageClass: 'rounded-lg max-w-full',
+                confirmButtonText: 'ปิด',
+                confirmButtonColor: '#ec4899'
+            });
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // รัศมีโลก (เมตร)
+            const p1 = lat1 * Math.PI/180;
+            const p2 = lat2 * Math.PI/180;
+            const dp = (lat2-lat1) * Math.PI/180;
+            const dl = (lon2-lon1) * Math.PI/180;
+
+            const a = Math.sin(dp/2) * Math.sin(dp/2) +
+                      Math.cos(p1) * Math.cos(p2) *
+                      Math.sin(dl/2) * Math.sin(dl/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+            return R * c; 
+        }
+
+        // --- Student Handlers ---
+        function submitLeave(e) {
+            e.preventDefault();
+            const reason = document.getElementById('leaveReason').value;
+            const outD = document.getElementById('leaveOut').value;
+            const inD = document.getElementById('leaveIn').value;
+
+            Swal.fire({
+                title: 'ยืนยันการขออนุญาต?',
+                text: 'ข้อมูลจะถูกส่งไปยังผู้ดูแลหอพักเพื่อพิจารณา',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#3b82f6',
+                confirmButtonText: 'ยืนยันการส่ง'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    mockRequests.unshift({
+                        id: 'REQ-' + Math.floor(Math.random() * 1000),
+                        studentId: currentUser.data.id,
+                        studentName: currentUser.data.name,
+                        reason: reason,
+                        outDate: outD,
+                        inDate: inD,
+                        status: 'pending'
+                    });
+
+                    Swal.fire('ส่งคำขอสำเร็จ!', 'กรุณารอผู้ดูแลหอพักอนุมัติ', 'success').then(() => navigate('student_dash'));
+                }
+            });
+        }
+
+        // --- Guardian Handlers ---
+        function handleRequest(reqId, action) {
+            const reqIndex = mockRequests.findIndex(r => r.id === reqId);
+            if (reqIndex === -1) return;
+
+            const actionText = action === 'approved' ? 'อนุญาต' : 'ไม่อนุญาต';
+            const actionColor = action === 'approved' ? '#22c55e' : '#ef4444';
+
+            Swal.fire({
+                title: `ยืนยันการ${actionText}?`,
+                text: `คำขอนี้จะถูกอัปเดตสถานะและแจ้งเตือนนักเรียน`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: actionColor,
+                confirmButtonText: `ใช่, ${actionText}`,
+                cancelButtonText: 'ยกเลิก'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    mockRequests[reqIndex].status = action;
+                    Swal.fire('สำเร็จ', `ระบบได้${actionText}คำขอเรียบร้อยแล้ว`, 'success');
+                    render();
+                }
+            });
+        }
+
+        function editScore(studentId) {
+            const student = mockStudents.find(s => s.id === studentId);
+            const originalScore = student.score;
+            
+            Swal.fire({
+                title: 'ปรับคะแนนพฤติกรรม',
+                html: `
+                    <p class="mb-2">นักเรียน: <strong>${student.name}</strong></p>
+                    <p class="mb-4 text-sm text-gray-500">คะแนนปัจจุบัน: <span class="font-bold text-lg text-pink-600">${student.score}</span> / 100</p>
+                    <div class="flex items-center gap-2 justify-center mb-4">
+                        <button onclick="document.getElementById('scoreInput').value = parseInt(document.getElementById('scoreInput').value) - 5" class="bg-red-100 text-red-600 w-8 h-8 rounded-full hover:bg-red-200 font-bold">-5</button>
+                        <input type="number" id="scoreInput" value="${student.score}" class="w-20 text-center border p-2 rounded text-lg focus:ring-2 focus:ring-blue-500 outline-none">
+                        <button onclick="document.getElementById('scoreInput').value = parseInt(document.getElementById('scoreInput').value) + 5" class="bg-green-100 text-green-600 w-8 h-8 rounded-full hover:bg-green-200 font-bold">+5</button>
+                    </div>
+                    <div class="text-left">
+                        <label class="block text-sm text-gray-700 font-bold mb-1">เหตุผลการปรับคะแนน <span class="text-red-500">*</span></label>
+                        <textarea id="scoreReason" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400 text-sm" rows="2" placeholder="เช่น ทำความสะอาดห้อง, กลับเข้าหอพักเกินเวลา..."></textarea>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'บันทึกคะแนน',
+                cancelButtonText: 'ยกเลิก',
+                preConfirm: () => {
+                    const newScore = document.getElementById('scoreInput').value;
+                    const reason = document.getElementById('scoreReason').value.trim();
+                    if (newScore < 0 || newScore > 100) {
+                        Swal.showValidationMessage('คะแนนต้องอยู่ระหว่าง 0 - 100');
+                        return false;
+                    }
+                    if (newScore != originalScore && !reason) {
+                        Swal.showValidationMessage('กรุณาระบุเหตุผลในการปรับคะแนน');
+                        return false;
+                    }
+                    return { newScore, reason };
+                }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const newScore = parseInt(result.value.newScore);
+                    if (!student.scoreHistory) student.scoreHistory = [];
+                    if (newScore != originalScore) {
+                        student.scoreHistory.unshift({
+                            date: new Date().toISOString(),
+                            oldScore: originalScore,
+                            newScore: newScore,
+                            reason: result.value.reason || "ปรับคะแนน (ไม่มีเหตุผล)"
+                        });
+                    }
+                    
+                    student.score = newScore;
+                    let successText = 'อัปเดตคะแนนพฤติกรรมเรียบร้อยแล้ว';
+                    if(result.value.reason) {
+                        successText += `<br><span class="text-sm text-gray-500">เหตุผล: ${result.value.reason}</span>`;
+                    }
+                    Swal.fire('บันทึกสำเร็จ', successText, 'success');
+                    render();
+                }
+            });
+        }
+
+        function viewScoreHistory(studentId) {
+            const student = mockStudents.find(s => s.id === studentId);
+            let historyHtml = '';
+            
+            if (!student.scoreHistory || student.scoreHistory.length === 0) {
+                historyHtml = '<p class="text-gray-500 text-sm my-6 text-center">ไม่มีประวัติการปรับคะแนนพฤติกรรม</p>';
+            } else {
+                historyHtml = '<div class="text-left mt-4 max-h-60 overflow-y-auto"><ul class="space-y-3">';
+                student.scoreHistory.forEach(h => {
+                    const diff = h.newScore - h.oldScore;
+                    const diffText = diff > 0 ? `<span class="text-green-600 font-bold">+${diff}</span>` : (diff < 0 ? `<span class="text-red-600 font-bold">${diff}</span>` : `<span class="text-gray-600 font-bold">0</span>`);
+                    historyHtml += `
+                        <li class="bg-gray-50 p-3 rounded border text-sm">
+                            <div class="flex justify-between mb-1">
+                                <span class="font-semibold text-gray-700">${formatDate(h.date)}</span>
+                                ${diffText}
+                            </div>
+                            <div class="text-gray-600 mb-1"><strong>เหตุผล:</strong> ${h.reason}</div>
+                            <div class="text-xs text-gray-500">คะแนนเดิม: ${h.oldScore} <i class="fa-solid fa-arrow-right mx-1 text-gray-400"></i> ล่าสุด: ${h.newScore}</div>
+                        </li>
+                    `;
+                });
+                historyHtml += '</ul></div>';
+            }
+
+            Swal.fire({
+                title: 'ประวัติคะแนนพฤติกรรม',
+                html: `<p class="font-bold text-lg text-pink-600 mb-2">${student.name}</p>` + historyHtml,
+                confirmButtonText: 'ปิด',
+                confirmButtonColor: '#ec4899'
+            });
+        }
+
+        function filterGuardianStudents() {
+            const query = document.getElementById('searchStudentInput').value.toLowerCase();
+            const rows = document.querySelectorAll('#guardianStudentTableBody tr');
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                row.style.display = text.includes(query) ? '' : 'none';
+            });
+        }
+
+        window.switchAddStudentTab = function(tab) {
+            if(tab === 'single') {
+                document.getElementById('tab-single').classList.remove('hidden');
+                document.getElementById('tab-bulk').classList.add('hidden');
+                document.getElementById('btn-tab-single').className = "flex-1 py-2 bg-blue-50 text-blue-600 font-bold rounded-t border-b-2 border-blue-600 transition";
+                document.getElementById('btn-tab-bulk').className = "flex-1 py-2 text-gray-500 hover:text-blue-500 font-bold rounded-t transition";
+            } else {
+                document.getElementById('tab-single').classList.add('hidden');
+                document.getElementById('tab-bulk').classList.remove('hidden');
+                document.getElementById('btn-tab-single').className = "flex-1 py-2 text-gray-500 hover:text-blue-500 font-bold rounded-t transition";
+                document.getElementById('btn-tab-bulk').className = "flex-1 py-2 bg-blue-50 text-blue-600 font-bold rounded-t border-b-2 border-blue-600 transition";
+            }
+        };
+
+        function openAddStudentModal() {
+            Swal.fire({
+                title: 'เพิ่มรายชื่อนักเรียนหอพัก',
+                html: `
+                    <div class="flex gap-2 mb-4 border-b pb-2">
+                        <button id="btn-tab-single" class="flex-1 py-2 bg-blue-50 text-blue-600 font-bold rounded-t border-b-2 border-blue-600 transition" onclick="switchAddStudentTab('single')">เพิ่มรายบุคคล</button>
+                        <button id="btn-tab-bulk" class="flex-1 py-2 text-gray-500 hover:text-blue-500 font-bold rounded-t transition" onclick="switchAddStudentTab('bulk')">อัปโหลดไฟล์ (หลายคน)</button>
+                    </div>
+                    
+                    <div id="tab-single" class="text-left space-y-3">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">รหัสนักเรียน <span class="text-red-500">*</span></label><input type="text" id="add-s-id" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น 65004"></div>
+                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">เบอร์ติดต่อ</label><input type="text" id="add-s-phone" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น 0812345678"></div>
+                        </div>
+                        <div><label class="text-sm text-gray-600 font-semibold mb-1 block">ชื่อ-นามสกุล <span class="text-red-500">*</span></label><input type="text" id="add-s-name" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น นาย เรียนดี มีชัย"></div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">ห้องพัก</label><input type="text" id="add-s-room" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น 101"></div>
+                            <div><label class="text-sm text-gray-600 font-semibold mb-1 block">เตียง</label><input type="text" id="add-s-bed" class="w-full border p-2 rounded outline-none focus:ring-2 focus:ring-blue-400" placeholder="เช่น A1"></div>
+                        </div>
+                    </div>
+
+                    <div id="tab-bulk" class="hidden text-left space-y-4">
+                        <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:bg-gray-50 transition cursor-pointer" onclick="document.getElementById('add-s-file').click()">
+                            <i class="fa-solid fa-file-excel text-4xl text-green-500 mb-2"></i>
+                            <p class="text-sm text-gray-600">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่</p>
+                            <p class="text-xs text-gray-400 mt-1">รองรับไฟล์ .xlsx, .xls, .csv</p>
+                            <input type="file" id="add-s-file" class="hidden" accept=".xlsx, .xls, .csv" onchange="document.getElementById('file-name-display').innerText = this.files[0] ? this.files[0].name : ''">
+                            <p id="file-name-display" class="text-sm text-blue-600 mt-2 font-semibold"></p>
+                        </div>
+                        <div class="bg-blue-50 p-3 rounded-lg text-xs text-blue-700">
+                            <i class="fa-solid fa-circle-info mr-1"></i> ระบบจะนำเข้าข้อมูล <strong>รหัส, ชื่อ-สกุล, ห้อง, เตียง</strong> เพื่อเพิ่มเข้าสู่ฐานข้อมูลโดยอัตโนมัติ
+                        </div>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'บันทึกข้อมูล',
+                cancelButtonText: 'ยกเลิก',
+                confirmButtonColor: '#ec4899',
+                preConfirm: () => {
+                    const activeTab = document.getElementById('tab-single').classList.contains('hidden') ? 'bulk' : 'single';
+                    if (activeTab === 'single') {
+                        const id = document.getElementById('add-s-id').value;
+                        const phone = document.getElementById('add-s-phone').value;
+                        const name = document.getElementById('add-s-name').value;
+                        const room = document.getElementById('add-s-room').value;
+                        const bed = document.getElementById('add-s-bed').value;
+                        if(!id || !name) {
+                            Swal.showValidationMessage('กรุณากรอกรหัสและชื่อนักเรียน');
+                            return false;
+                        }
+                        return { type: 'single', data: { id, name, phone: phone||"-", room: room||"-", bed: bed||"-", score: 100, status: 'out', latestPhoto: null, scoreHistory: [] } };
+                    } else {
+                        const fileInput = document.getElementById('add-s-file');
+                        if (!fileInput.files.length) {
+                            Swal.showValidationMessage('กรุณาเลือกไฟล์ก่อนกดบันทึก');
+                            return false;
+                        }
+                        return { type: 'bulk', file: fileInput.files[0] };
+                    }
+                }
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    if (result.value.type === 'single') {
+                        mockStudents.push(result.value.data);
+                        Swal.fire('สำเร็จ', 'เพิ่มนักเรียนรายใหม่เรียบร้อยแล้ว', 'success');
+                        render();
+                    } else {
+                        Swal.fire({ title: 'กำลังอัปโหลด...', text: 'กรุณารอสักครู่', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+                        setTimeout(() => {
+                            mockStudents.push(
+                                { id: "65004", name: "นาย สมบูรณ์ เพิ่มจากไฟล์", phone: "0899999999", room: "202", bed: "A1", score: 100, status: "out", latestPhoto: null, scoreHistory: [] },
+                                { id: "65005", name: "นางสาว สุดสวย ทดสอบอัปโหลด", phone: "0888888888", room: "202", bed: "A2", score: 100, status: "out", latestPhoto: null, scoreHistory: [] }
+                            );
+                            Swal.fire('สำเร็จ', `นำเข้าข้อมูลนักเรียนจำลองจากไฟล์ <b>${result.value.file.name}</b> สำเร็จ!`, 'success');
+                            render();
+                        }, 1500);
+                    }
+                }
+            });
+        }
+
+        // --- Admin Handlers ---
+        function saveGPS() {
+            const lat = document.getElementById('adminLat').value;
+            const lng = document.getElementById('adminLng').value;
+            const radius = document.getElementById('adminRadius').value;
+            if(!lat || !lng || !radius) return Swal.fire('Error', 'กรุณากรอกข้อมูลให้ครบ', 'error');
+            
+            systemSettings.targetLat = parseFloat(lat);
+            systemSettings.targetLng = parseFloat(lng);
+            systemSettings.radius = parseInt(radius);
+            Swal.fire('สำเร็จ', 'อัปเดตพิกัดและรัศมีหอพักเรียบร้อย', 'success');
+        }
+
+        function autoFetchGPS() {
+            if (navigator.geolocation) {
+                Swal.fire({ title: 'กำลังค้นหาพิกัด...', text: 'กรุณารอสักครู่และกดอนุญาตการเข้าถึงตำแหน่ง', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        document.getElementById('adminLat').value = pos.coords.latitude.toFixed(6);
+                        document.getElementById('adminLng').value = pos.coords.longitude.toFixed(6);
+                        Swal.close();
+                        Swal.fire('ดึงพิกัดสำเร็จ', 'ดึงพิกัดปัจจุบันเรียบร้อยแล้ว กรุณากดบันทึกพิกัด', 'success');
+                    },
+                    (err) => {
+                        Swal.fire('ข้อผิดพลาด', 'ไม่สามารถดึงพิกัดได้ (กรุณาอนุญาต Location)', 'error');
+                    }
+                );
+            } else {
+                Swal.fire('ข้อผิดพลาด', 'เบราว์เซอร์นี้ไม่รองรับระบบ GPS', 'error');
+            }
+        }
+
+        function openAddGuardian() {
+            Swal.fire({
+                title: 'เพิ่มผู้ดูแลหอพัก',
+                html: `
+                    <input id="swal-g-id" class="swal2-input" placeholder="รหัสผู้ดูแล (เช่น G003)">
+                    <input id="swal-g-name" class="swal2-input" placeholder="ชื่อ-นามสกุล">
+                    <input id="swal-g-pin" type="password" class="swal2-input" placeholder="PIN 6 หลัก" maxlength="6">
+                `,
+                focusConfirm: false,
+                showCancelButton: true,
+                confirmButtonText: 'บันทึก',
+                preConfirm: () => {
+                    const id = document.getElementById('swal-g-id').value;
+                    const name = document.getElementById('swal-g-name').value;
+                    const pin = document.getElementById('swal-g-pin').value;
+                    if (!id || !name || pin.length !== 6) Swal.showValidationMessage('กรุณากรอกข้อมูลให้ครบ และ PIN 6 หลัก');
+                    return { id, name, pin };
+                }
+            }).then((res) => {
+                if (res.isConfirmed) {
+                    mockGuardians.push(res.value);
+                    Swal.fire('สำเร็จ', 'เพิ่มผู้ดูแลเรียบร้อย', 'success');
+                    render();
+                }
+            });
+        }
+
+        function openEditGuardian(id) {
+            const g = mockGuardians.find(x => x.id === id);
+            Swal.fire({
+                title: 'แก้ไขผู้ดูแล',
+                html: `
+                    <input id="swal-g-id" class="swal2-input bg-gray-100" value="${g.id}" readonly title="ไม่สามารถแก้รหัสได้">
+                    <input id="swal-g-name" class="swal2-input" value="${g.name}" placeholder="ชื่อ-นามสกุล">
+                    <input id="swal-g-pin" type="text" class="swal2-input" value="${g.pin}" placeholder="PIN 6 หลัก" maxlength="6">
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'บันทึกการแก้ไข',
+                preConfirm: () => {
+                    const name = document.getElementById('swal-g-name').value;
+                    const pin = document.getElementById('swal-g-pin').value;
+                    if (!name || pin.length !== 6) Swal.showValidationMessage('กรุณากรอกชื่อ และ PIN 6 หลัก');
+                    return { name, pin };
+                }
+            }).then((res) => {
+                if (res.isConfirmed) {
+                    g.name = res.value.name;
+                    g.pin = res.value.pin;
+                    Swal.fire('สำเร็จ', 'อัปเดตข้อมูลเรียบร้อย', 'success');
+                    render();
+                }
+            });
+        }
+
+        function deleteGuardian(id) {
+            Swal.fire({
+                title: 'ยืนยันการลบ?',
+                text: "หากลบแล้วจะไม่สามารถกู้คืนได้",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#ef4444',
+                confirmButtonText: 'ใช่, ลบเลย'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    mockGuardians = mockGuardians.filter(g => g.id !== id);
+                    Swal.fire('ลบสำเร็จ!', 'ข้อมูลผู้ดูแลถูกลบแล้ว.', 'success');
+                    render();
+                }
+            });
+        }
+
+        // Utils
+        function formatDate(isoString) {
+            const d = new Date(isoString);
+            return d.toLocaleString('th-TH', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) + ' น.';
+        }
+
+        // เริ่มต้นการทำงาน (เรียก Render ทันทีที่โหลดเสร็จ)
+        window.onload = () => render();
+    </script>
+</body>
+</html>
